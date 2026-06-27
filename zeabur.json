@@ -1,0 +1,8 @@
+{
+  "name": "newtaipei-noise-control-system",
+  "framework": "dockerfile",
+  "port": 8080,
+  "volumes": [
+    { "id": "noise-data", "dir": "/app/data" }
+  ]
+}
