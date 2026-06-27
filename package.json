@@ -1,8 +1,8 @@
 {
-  "name": "newtaipei-noise-control-system-line-native-v6",
-  "version": "1.2.0",
+  "name": "newtaipei-noise-control-system-line-native-v9",
+  "version": "1.4.0",
   "private": true,
-  "description": "新北市打擊噪音車管理計畫：LINE 原生操作版 V5，後台一鍵建立/更新 Rich Menu。",
+  "description": "新北市打擊噪音車管理計畫：LINE 原生 V9，新增法規新聞與設備檢定到期提醒。",
   "type": "module",
   "scripts": {
     "start": "node server.js",

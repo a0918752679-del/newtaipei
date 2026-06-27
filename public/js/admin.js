@@ -4,7 +4,7 @@ async function checkLoad(){
 }
 function renderAdmin(store){
   $('#settingsGoal').value = store.settings?.annualGoal || 490;
-  $('#counts').innerHTML = `<div class="kpi-grid"><div class="kpi"><div class="label">成果資料</div><div class="value">${fmt(store.records.length)}</div></div><div class="kpi"><div class="label">外勤回報</div><div class="value">${fmt(store.fieldReports.length)}</div></div><div class="kpi"><div class="label">更新時間</div><div class="value" style="font-size:24px">${new Date(store.updatedAt).toLocaleString('zh-TW')}</div></div><div class="kpi"><div class="label">年度目標</div><div class="value">${fmt(store.settings?.annualGoal||490)}</div></div></div>`;
+  $('#counts').innerHTML = `<div class="kpi-grid"><div class="kpi"><div class="label">成果資料</div><div class="value">${fmt(store.records.length)}</div></div><div class="kpi"><div class="label">外勤回報</div><div class="value">${fmt(store.fieldReports.length)}</div></div><div class="kpi"><div class="label">設備管理</div><div class="value">${fmt((store.equipment||[]).length)}</div></div><div class="kpi"><div class="label">更新時間</div><div class="value" style="font-size:24px">${new Date(store.updatedAt).toLocaleString('zh-TW')}</div></div><div class="kpi"><div class="label">年度目標</div><div class="value">${fmt(store.settings?.annualGoal||490)}</div></div></div>`;
   $('#recordPreview').innerHTML = store.records.slice(-20).reverse().map(r=>`<tr><td>${r.date}</td><td>${r.sessionNo}</td><td>${r.district}</td><td>${r.location}</td><td>${r.plateNo||'-'}</td><td>${r.citationCount}</td><td>${r.inspectionCount}</td></tr>`).join('');
 }
 window.addEventListener('DOMContentLoaded',()=>{
@@ -35,6 +35,26 @@ window.addEventListener('DOMContentLoaded',()=>{
     }catch(err){
       $('#richMenuResult').textContent='❌ 查詢失敗：'+err.message;
     }
+  });
+
+
+  $('#pushEquipmentReminder')?.addEventListener('click', async()=>{
+    if(!confirm('確認立即推播設備到期提醒給已互動使用者？')) return;
+    $('#richMenuResult').textContent='正在推播設備提醒...';
+    try{
+      const data=await api('/api/admin/line/push/equipment-reminder',{method:'POST',body:'{}'});
+      $('#richMenuResult').textContent=`✅ ${data.message}`;
+    }catch(err){ $('#richMenuResult').textContent='❌ 推播失敗：'+err.message; }
+  });
+  $('#equipmentImportForm')?.addEventListener('submit',async e=>{
+    e.preventDefault();
+    const fd=new FormData(e.target);
+    const res=await fetch('/api/admin/equipment/import',{method:'POST',body:fd});
+    const data=await res.json();
+    if(!res.ok) return alert(data.message||'設備匯入失敗');
+    alert(`${data.message}
+來源工作表：${data.sheetName}`);
+    await checkLoad();
   });
 
   $('#downloadRichSpec').addEventListener('click',async()=>{const data=await api('/api/line/rich-menu-spec'); const blob=new Blob([JSON.stringify(data.spec,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='line-rich-menu.json'; a.click();});

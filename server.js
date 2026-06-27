@@ -43,6 +43,8 @@ function readStore() {
   const data = JSON.parse(raw);
   data.records ||= [];
   data.fieldReports ||= [];
+  data.equipment ||= [];
+  data.lineUsers ||= [];
   data.settings ||= {};
   return data;
 }
@@ -305,6 +307,117 @@ app.post('/api/admin/settings', requireAdmin, (req, res) => {
   writeStore(store);
   res.json({ ok: true, settings: store.settings });
 });
+
+function normalizeDateInput(v) {
+  if (!v && v !== 0) return '';
+  if (typeof v === 'number') {
+    const parsed = xlsx.SSF.parse_date_code(v);
+    if (parsed) return `${parsed.y}-${String(parsed.m).padStart(2,'0')}-${String(parsed.d).padStart(2,'0')}`;
+  }
+  const raw = String(v).trim();
+  if (!raw) return '';
+  const minguo = raw.match(/^(\d{2,3})[\/\-.年](\d{1,2})[\/\-.月](\d{1,2})/);
+  if (minguo) return `${Number(minguo[1])+1911}-${String(minguo[2]).padStart(2,'0')}-${String(minguo[3]).padStart(2,'0')}`;
+  const m = raw.match(/(20\d{2})[\/\-.年](\d{1,2})[\/\-.月](\d{1,2})/);
+  if (m) return `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
+  return raw;
+}
+
+function normalizeEquipmentRow(row, index) {
+  const equipmentId = norm(firstOf(row, ['equipmentId','設備','設備編號','機台','機台編號','機號','machineNo','儀器編號'])) || `EQ${String(index+1).padStart(3,'0')}`;
+  return {
+    equipmentId,
+    machineNo: equipmentId,
+    name: norm(firstOf(row, ['name','設備名稱','名稱'])) || '聲音照相設備',
+    location: norm(firstOf(row, ['location','地點','設置地點','行政區'])) || '',
+    centralComparisonDate: normalizeDateInput(firstOf(row, ['centralComparisonDate','比測日期','中央比測','比測','比測驗證日期'])),
+    noiseMeterDate: normalizeDateInput(firstOf(row, ['noiseMeterDate','噪音計','噪音計檢定','噪音計檢定日期','檢定日期'])),
+    anemometerDate: normalizeDateInput(firstOf(row, ['anemometerDate','風速計','風速計檢定','風速計檢定日期'])),
+    owner: norm(firstOf(row, ['owner','保管人','負責人'])) || '',
+    notes: norm(firstOf(row, ['notes','備註','說明'])) || '',
+    source: 'equipment-import'
+  };
+}
+
+function defaultEquipmentFromRecords(store) {
+  const ids = [...new Set((store.records || []).map(r => r.machineNo).filter(Boolean))].sort();
+  const base = ['2025-07-10','2025-12-15','2026-05-18','2026-06-10','2024-12-20','2026-01-05','2026-04-21','2026-06-01'];
+  return ids.map((id, i) => ({
+    equipmentId: id,
+    machineNo: id,
+    name: '移動式聲音照相設備',
+    location: '',
+    centralComparisonDate: base[(i+2)%base.length],
+    noiseMeterDate: base[i%base.length],
+    anemometerDate: base[(i+1)%base.length],
+    owner: '',
+    notes: '由成果資料自動建立，可於設備管理表覆蓋。',
+    source: 'auto-seed'
+  }));
+}
+
+function addYears(dateStr, years) {
+  const d = new Date(dateStr);
+  if (!Number.isFinite(d.getTime())) return '';
+  d.setFullYear(d.getFullYear() + years);
+  return d.toISOString().slice(0,10);
+}
+function daysUntil(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00+08:00');
+  if (!Number.isFinite(d.getTime())) return null;
+  const now = new Date();
+  const todayTW = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
+  todayTW.setHours(0,0,0,0);
+  return Math.ceil((d - todayTW) / 86400000);
+}
+function dueItem(label, date, years) {
+  const dueDate = addYears(date, years);
+  const days = dueDate ? daysUntil(dueDate) : null;
+  let level = 'unknown', icon = '⚪', status = '未建檔';
+  if (days !== null) {
+    if (days < 0) { level='red'; icon='🔴'; status=`已逾期${Math.abs(days)}天`; }
+    else if (days <= 30) { level='yellow'; icon='🟡'; status=`剩餘${days}天`; }
+    else { level='green'; icon='🟢'; status=`剩餘${days}天`; }
+  }
+  return { label, lastDate: date || '-', dueDate: dueDate || '-', days, level, icon, status, years };
+}
+function analyzeEquipment(e) {
+  const items = [
+    dueItem('中央比測', e.centralComparisonDate, 2),
+    dueItem('噪音計檢定', e.noiseMeterDate, 1),
+    dueItem('風速計檢定', e.anemometerDate, 1)
+  ];
+  const rank = { red:3, yellow:2, unknown:1, green:0 };
+  const worst = items.reduce((a,b)=>rank[b.level]>rank[a.level]?b:a, items[0]);
+  return { ...e, items, level: worst.level, icon: worst.icon, status: worst.status, priorityItem: worst.label, priorityDueDate: worst.dueDate };
+}
+function getEquipmentList() {
+  const store = readStore();
+  const list = (store.equipment && store.equipment.length ? store.equipment : defaultEquipmentFromRecords(store)).map(analyzeEquipment);
+  const rank = { red:0, yellow:1, unknown:2, green:3 };
+  return list.sort((a,b)=>rank[a.level]-rank[b.level] || (a.priorityDueDate||'9999').localeCompare(b.priorityDueDate||'9999'));
+}
+function equipmentSummary() {
+  const list = getEquipmentList();
+  return {
+    total: list.length,
+    green: list.filter(x=>x.level==='green').length,
+    yellow: list.filter(x=>x.level==='yellow').length,
+    red: list.filter(x=>x.level==='red').length,
+    unknown: list.filter(x=>x.level==='unknown').length,
+    alerts: list.filter(x=>['red','yellow'].includes(x.level))
+  };
+}
+function rememberLineUser(userId) {
+  if (!userId || userId === 'unknown') return;
+  const store = readStore();
+  store.lineUsers ||= [];
+  if (!store.lineUsers.includes(userId)) {
+    store.lineUsers.push(userId);
+    writeStore(store);
+  }
+}
+
 app.post('/api/admin/import', requireAdmin, upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ ok: false, message: '未收到檔案' });
   const mode = req.body.mode || 'append';
@@ -319,6 +432,22 @@ app.post('/api/admin/import', requireAdmin, upload.single('file'), (req, res) =>
   fs.unlink(req.file.path, () => {});
   res.json({ ok: true, count: imported.length, mode });
 });
+
+app.post('/api/admin/equipment/import', requireAdmin, upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ ok: false, message: '未收到設備管理檔案' });
+  const workbook = xlsx.readFile(req.file.path, { cellDates: false });
+  const sheetName = workbook.SheetNames.find(n => /設備|儀器|檢定|比測/.test(n)) || workbook.SheetNames[0];
+  const rows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' });
+  const equipment = rows.map(normalizeEquipmentRow).filter(e => e.equipmentId);
+  const store = readStore();
+  store.equipment = equipment;
+  writeStore(store);
+  fs.unlink(req.file.path, () => {});
+  res.json({ ok: true, sheetName, count: equipment.length, message: `已匯入設備管理資料 ${equipment.length} 筆` });
+});
+
+app.get('/api/equipment', (_req, res) => res.json({ ok: true, data: { summary: equipmentSummary(), list: getEquipmentList() } }));
+
 app.delete('/api/admin/reset', requireAdmin, (_req, res) => {
   fs.copyFileSync(SEED_PATH, STORE_PATH);
   res.json({ ok: true, message: '已還原範例資料' });
@@ -365,7 +494,7 @@ async function lineApi(pathname, options = {}) {
 
 async function createAndSetDefaultRichMenu() {
   const spec = buildRichMenuSpec(PUBLIC_BASE_URL);
-  spec.name = '新北噪音車V5圖文選單';
+  spec.name = '新北噪音車V9智慧版圖文選單';
 
   // 先建立新的 Rich Menu
   const created = await lineApi('/v2/bot/richmenu', {
@@ -432,22 +561,41 @@ function flexUriButton(label, uri, color = '#0b62d6') {
   return { type: 'button', style: 'primary', color, height: 'sm', action: { type: 'uri', label, uri } };
 }
 
+function iconText(icon, title, subtitle) {
+  return { type:'box', layout:'horizontal', spacing:'md', alignItems:'center', contents:[
+    { type:'box', layout:'vertical', width:'44px', height:'44px', cornerRadius:'12px', backgroundColor:'#e8f1ff', justifyContent:'center', alignItems:'center', contents:[{ type:'text', text:icon, size:'xl', align:'center' }]},
+    { type:'box', layout:'vertical', flex:1, contents:[
+      { type:'text', text:title, weight:'bold', size:'md', color:'#092b5f' },
+      { type:'text', text:subtitle, size:'xs', color:'#6b7788', wrap:true }
+    ]}
+  ]};
+}
+
 function getLineHomeFlex() {
   return {
     type: 'flex',
-    altText: '新北市打擊噪音車管理系統',
+    altText: '新北市打擊噪音車管理系統主選單',
     contents: {
       type: 'bubble', size: 'mega',
-      header: { type: 'box', layout: 'vertical', spacing: 'sm', backgroundColor: '#073b82', contents: [
-        { type: 'text', text: '新北市打擊噪音車管理系統', weight: 'bold', size: 'lg', color: '#ffffff' },
-        { type: 'text', text: 'LINE 主選單｜成果查詢與外勤回報可直接開啟指定平台', size: 'xs', color: '#d9ecff', wrap: true }
+      header: { type: 'box', layout: 'vertical', spacing: 'sm', backgroundColor: '#073b82', paddingAll:'18px', contents: [
+        { type: 'text', text: '🚦 新北市打擊噪音車管理系統', weight: 'bold', size: 'lg', color: '#ffffff' },
+        { type: 'text', text: '請直接點選下方功能，我會協助你快速查詢或回報。', size: 'sm', color: '#d9ecff', wrap: true }
       ]},
-      body: { type: 'box', layout: 'vertical', spacing: 'md', contents: [
-        { type: 'box', layout: 'horizontal', spacing: 'sm', contents: [flexUriButton('📊 成果', DASHBOARD_URL), flexButton('📈 KPI', 'KPI報表', '#2549b8')]},
-        { type: 'box', layout: 'horizontal', spacing: 'sm', contents: [flexUriButton('🚓 回報', FIELD_REPORT_URL, '#009b72'), flexButton('🚗 車號', '車號查詢', '#f58a00')]},
-        { type: 'box', layout: 'horizontal', spacing: 'sm', contents: [flexButton('🏙 行政區', '行政區統計', '#6f4be6'), flexButton('⚙ 管理', '管理功能', '#54606f')]},
-        { type: 'separator', margin: 'md' },
-        { type: 'text', text: '成果查詢連結：noise115；外勤回報連結：out115。KPI、行政區、車號與管理功能維持 LINE 內操作。', size: 'xs', color: '#516070', wrap: true }
+      body: { type: 'box', layout: 'vertical', spacing: 'md', paddingAll:'16px', contents: [
+        iconText('📊', '成果查詢系統', '開啟成果平台，查看完整圖表與條件篩選。'),
+        flexUriButton('開啟成果查詢', DASHBOARD_URL),
+        iconText('📝', '外勤回報平台', '前線人員填寫場次、機台、照片與座標。'),
+        flexUriButton('開啟外勤回報', FIELD_REPORT_URL, '#009b72'),
+        { type:'separator', margin:'md' },
+        { type:'box', layout:'horizontal', spacing:'sm', contents: [
+          flexButton('📈 KPI報表', 'KPI報表', '#2549b8'),
+          flexButton('📅 月份/行政區', '統計選單', '#6f4be6')
+        ]},
+        { type:'box', layout:'horizontal', spacing:'sm', contents: [
+          flexButton('🚗 車號查詢', '車號查詢', '#f58a00'),
+          flexButton('⚙ 管理功能', '管理功能', '#54606f')
+        ]},
+        { type: 'text', text: '也可以直接輸入：2月份執行成效、淡水區執行成效、車牌 ABC-1234。', size: 'xs', color: '#7b8794', wrap: true, margin:'md' }
       ]}
     }
   };
@@ -457,23 +605,44 @@ function quickReply(items) {
   return { items: items.slice(0, 13).map(([label, text]) => ({ type: 'action', action: { type: 'message', label, text } })) };
 }
 
+
+function getStatsSelectFlex() {
+  return {
+    type:'flex', altText:'月份與行政區統計選單', contents:{
+      type:'bubble', size:'mega',
+      header:{ type:'box', layout:'vertical', backgroundColor:'#6f4be6', paddingAll:'18px', contents:[
+        { type:'text', text:'📅 統計查詢', color:'#ffffff', weight:'bold', size:'lg' },
+        { type:'text', text:'可選月份、行政區或時段，快速取得執行成果。', color:'#efe8ff', size:'sm', wrap:true }
+      ]},
+      body:{ type:'box', layout:'vertical', spacing:'md', paddingAll:'16px', contents:[
+        iconText('📅','月份統計','查看各月份執行場次、告發、通知到檢與 KPI。'),
+        flexButton('選擇月份', '月份統計', '#2549b8'),
+        iconText('🏙','行政區統計','查看各行政區成果排行與治理成效。'),
+        flexButton('選擇行政區', '行政區統計', '#6f4be6'),
+        iconText('🌙','時段統計','掌握日間、夜間與敏感時段成效。'),
+        flexButton('查看時段統計', '時段統計', '#f58a00')
+      ]}
+    }
+  };
+}
+
 function getResultsMenuText() {
   return {
     type: 'flex',
     altText: '成果查詢選單',
     contents: {
       type: 'bubble', size: 'mega',
-      header: { type:'box', layout:'vertical', backgroundColor:'#073b82', contents:[
-        { type:'text', text:'成果查詢選單', color:'#ffffff', weight:'bold', size:'lg' },
-        { type:'text', text:'可直接開啟成果平台，也可在 LINE 內查詢統計。', color:'#d9ecff', size:'xs', wrap:true }
+      header: { type:'box', layout:'vertical', backgroundColor:'#073b82', paddingAll:'18px', contents:[
+        { type:'text', text:'📊 成果查詢', color:'#ffffff', weight:'bold', size:'lg' },
+        { type:'text', text:'完整儀表板可開啟平台；常用統計可直接在 LINE 內查。', color:'#d9ecff', size:'sm', wrap:true }
       ]},
-      body: { type:'box', layout:'vertical', spacing:'sm', contents:[
+      body: { type:'box', layout:'vertical', spacing:'md', paddingAll:'16px', contents:[
+        iconText('🖥','成果平台','開啟圖表、地圖與完整篩選介面。'),
         flexUriButton('開啟成果查詢系統', DASHBOARD_URL),
-        flexButton('計畫執行進度', '進度', '#2549b8'),
-        flexButton('月份統計', '月份統計', '#2549b8'),
-        flexButton('行政區統計', '行政區統計', '#6f4be6'),
-        flexButton('時段統計', '時段統計', '#6f4be6'),
-        flexButton('車號追蹤', '車號查詢', '#f58a00')
+        { type:'separator', margin:'md' },
+        { type:'box', layout:'horizontal', spacing:'sm', contents:[flexButton('📌 進度', '進度', '#2549b8'), flexButton('📈 KPI', 'KPI報表', '#2549b8')]},
+        { type:'box', layout:'horizontal', spacing:'sm', contents:[flexButton('📅 月份', '月份統計', '#6f4be6'), flexButton('🏙 行政區', '行政區統計', '#6f4be6')]},
+        { type:'box', layout:'horizontal', spacing:'sm', contents:[flexButton('🌙 時段', '時段統計', '#f58a00'), flexButton('🚗 車號', '車號查詢', '#f58a00')]}
       ]}
     }
   };
@@ -514,7 +683,7 @@ function formatRankingText(type = 'district') {
   const list = type === 'month' ? stats.monthly : type === 'time' ? stats.timePeriods : stats.districts;
   const title = type === 'month' ? '月份統計排行' : type === 'time' ? '時段統計排行' : '行政區統計排行';
   const lines = list.slice(0, 8).map((x, i) => `${i+1}. ${x.name}｜${x.sessions}場｜告發${x.citationCount}｜通檢${x.inspectionCount}｜KPI ${x.kpi.toFixed(2)}`);
-  return `${title}\n${lines.join('\n') || '目前無資料'}`;
+  return `📊 ${title}\n${lines.join('\n') || '目前尚無資料'}\n\n需要單一月份或行政區，請直接點選下方選單或輸入「淡水區執行成效」。`;
 }
 
 function formatPlateText(plate) {
@@ -561,15 +730,24 @@ const fieldSteps = [
 ];
 
 function getFieldReportMenu() {
-  return { type:'flex', altText:'外勤回報', contents:{ type:'bubble', size:'mega', header:{type:'box', layout:'vertical', backgroundColor:'#009b72', contents:[{type:'text', text:'外勤回報', color:'#ffffff', weight:'bold', size:'lg'}]}, body:{type:'box', layout:'vertical', spacing:'md', contents:[{type:'text', text:'建議使用外勤回報平台填寫完整照片與座標資料；也可使用 LINE 簡易填報。', size:'sm', color:'#516070', wrap:true}, {type:'text', text:`外勤平台：${FIELD_REPORT_URL}`, size:'xs', color:'#7b8794', wrap:true}]}, footer:{type:'box', layout:'vertical', spacing:'sm', contents:[flexUriButton('開啟外勤回報平台', FIELD_REPORT_URL, '#009b72'), flexButton('LINE簡易填報', 'LINE填報', '#2549b8')]}} };
+  return { type:'flex', altText:'外勤回報', contents:{ type:'bubble', size:'mega',
+    header:{type:'box', layout:'vertical', backgroundColor:'#009b72', paddingAll:'18px', contents:[
+      {type:'text', text:'📝 外勤回報', color:'#ffffff', weight:'bold', size:'lg'},
+      {type:'text', text:'請依現場狀況選擇回報方式。', color:'#dbfff5', size:'sm'}
+    ]},
+    body:{type:'box', layout:'vertical', spacing:'md', paddingAll:'16px', contents:[
+      iconText('📷','完整回報平台','適合上傳架設照片、告示牌照片、座標與完整欄位。'),
+      flexUriButton('開啟外勤回報平台', FIELD_REPORT_URL, '#009b72'),
+      iconText('💬','LINE 簡易填報','適合先快速登錄場次，後續可由後台補件。'),
+      flexButton('開始 LINE 簡易填報', 'LINE填報', '#2549b8'),
+      {type:'text', text:'提醒：正式照片與佐證資料，建議仍使用外勤回報平台補齊。', size:'xs', color:'#7b8794', wrap:true}
+    ]}
+  } };
 }
 
 function startFieldReport(userId) {
   lineStates.set(userId, { mode: 'field', step: 0, data: {} });
-  return { type:'text', text:`開始 LINE 簡易外勤回報。
-${fieldSteps[0][1]}
-
-如需上傳照片或完整座標，請輸入「外勤回報」開啟正式平台。` };
+  return { type:'text', text:`已開始 LINE 簡易外勤回報。\n請依序回覆欄位即可，我會一步一步協助建立紀錄。\n\n${fieldSteps[0][1]}\n\n若要改用照片與完整欄位，請輸入「外勤回報」開啟正式平台。` };
 }
 
 function handleFieldReport(userId, text) {
@@ -614,21 +792,130 @@ function confirmFieldReport(userId, text) {
   store.fieldReports.push(report);
   writeStore(store);
   lineStates.delete(userId);
-  return { type:'text', text:`已完成外勤回報。\n回報編號：${report.id}\n場次：${report.sessionNo}\n行政區：${report.district}` };
+  return { type:'text', text:`✅ 已收到外勤回報，辛苦了。\n回報編號：${report.id}\n場次：${report.sessionNo || '-'}\n行政區：${report.district || '-'}\n\n後續可由管理功能匯出或補登完整資料。` };
 }
 
 function adminMenuText() {
-  return { type:'text', text:'管理功能請選擇：', quickReply: quickReply([
-    ['管理登入','管理登入'], ['匯出Excel','匯出Excel'], ['今日回報','今日回報'], ['平台後台','平台後台']
+  return { type:'text', text:'⚙ 管理功能請選擇：\n需要匯出或調整資料時，可進入後台操作。', quickReply: quickReply([
+    ['匯出Excel','匯出Excel'], ['今日回報','今日回報'], ['平台後台','平台後台'], ['成果查詢','成果查詢']
   ]) };
 }
+
 
 function formatStatsForLine(query) {
   const stats = computeStats(query);
   const label = [query.month ? `${query.month}月` : '', query.district || '', query.plate ? `車號 ${query.plate}` : ''].filter(Boolean).join('｜') || '全計畫';
-  const plateLine = query.plate && stats.plates[0] ? `\n車號追蹤：${stats.plates[0].plateNo}\n累犯判定：${stats.plates[0].repeatOffender ? '是' : '否'}｜最高超標：${stats.plates[0].maxDbOver.toFixed(1)} dB` : '';
-  return `【${label} 執行成效】\n已完成：${stats.completed}/${stats.goal}場（${(stats.progressRate*100).toFixed(1)}%）\n查詢筆數：${stats.recent.length}筆\n執行場次：${stats.total.sessions}場\n車流辨識：${stats.total.detectCount.toLocaleString()}件\n超標件數：${stats.total.exceedCount.toLocaleString()}件\n告發件數：${stats.total.citationCount.toLocaleString()}件\n通知到檢：${stats.total.inspectionCount.toLocaleString()}件\n告發率：${(stats.total.citationRate*100).toFixed(1)}%\n通檢率：${(stats.total.inspectionRate*100).toFixed(1)}%\nKPI成效：${stats.total.kpi.toFixed(2)}${plateLine}`;
+  const plateLine = query.plate && stats.plates[0] ? `\n🚗 車號追蹤：${stats.plates[0].plateNo}\n🔁 累犯判定：${stats.plates[0].repeatOffender ? '是' : '否'}｜最高超標：${stats.plates[0].maxDbOver.toFixed(1)} dB` : '';
+  return `📊【${label} 執行成效】\n已完成：${stats.completed}/${stats.goal}場（${(stats.progressRate*100).toFixed(1)}%）\n查詢筆數：${stats.recent.length}筆\n\n📍 執行場次：${stats.total.sessions}場\n🚘 車流辨識：${stats.total.detectCount.toLocaleString()}件\n🔊 超標件數：${stats.total.exceedCount.toLocaleString()}件\n⚖️ 告發件數：${stats.total.citationCount.toLocaleString()}件\n📄 通知到檢：${stats.total.inspectionCount.toLocaleString()}件\n\n📈 告發率：${(stats.total.citationRate*100).toFixed(1)}%\n📋 通檢率：${(stats.total.inspectionRate*100).toFixed(1)}%\n🎯 KPI成效：${stats.total.kpi.toFixed(2)}${plateLine}\n\n我也可以協助查「月份統計」或「行政區統計」。`;
 }
+
+
+const lawSources = {
+  moenvRevision: 'https://air.moenv.gov.tw/News/news.aspx?ID=6442',
+  moenvLaw: 'https://oaout.moenv.gov.tw/law/LawContent.aspx?id=FL015471',
+  lawMoj: 'https://law.moj.gov.tw/LawClass/LawAll.aspx?pcode=O0030001',
+  noiseCar: 'https://noisecar.moenv.gov.tw/',
+  cnaSearch: 'https://www.cna.com.tw/search/hysearchws.aspx?q=%E5%99%AA%E9%9F%B3%E8%BB%8A',
+  nera: 'https://www.nera.gov.tw/zh-tw/testvehicle/2.html'
+};
+const lawArticles = {
+  11: '第11條\n機動車輛、民用航空器所發出之聲音，不得超過機動車輛、民用航空器噪音管制標準；其標準，由中央主管機關會同交通部定之。機動車輛供國內使用者，應符合前項噪音管制標準，始得進口、製造及使用。使用中機動車輛、民用航空器噪音管制項目、程序、限制、檢驗人員資格及其他應遵行事項之辦法，由中央主管機關會同交通部定之。',
+  13: '第13條\n人民得向主管機關檢舉使用中機動車輛噪音妨害安寧情形。經主管機關通知檢驗者，車輛所有人或使用人應於指定期限內至指定地點接受檢驗。',
+  26: '第26條\n機動車輛發出超過噪音管制標準之聲音者，處機動車輛所有人或使用人新臺幣3,600元以上36,000元以下罰鍰，並通知限期改善；屆期仍未完成改善者，按次處罰。情節重大者，得移請公路監理機關吊扣牌照至改善完成後發還；一年內再犯者，得吊扣牌照六個月。',
+  28: '第28條\n不依第13條規定檢驗，或經檢驗不符合管制標準者，處機動車輛所有人或使用人新臺幣3,600元以上36,000元以下罰鍰，並通知限期改善；屆期仍未完成改善者，按次處罰。'
+};
+
+function lawButton(label, text, color = '#0b62d6') { return flexButton(label, text, color); }
+function getLawCenterFlex() {
+  return { type:'flex', altText:'法規中心與噪音車新聞', contents:{ type:'carousel', contents:[
+    { type:'bubble', size:'mega', header:{type:'box', layout:'vertical', backgroundColor:'#c2272d', paddingAll:'18px', contents:[{type:'text', text:'🚨 最新修法', color:'#fff', weight:'bold', size:'lg'}, {type:'text', text:'噪音管制法車輛噪音罰則強化', color:'#ffe5e5', size:'sm'}]}, body:{type:'box', layout:'vertical', spacing:'md', contents:[
+      {type:'text', text:'✔ 最高罰鍰提高至 3萬6千元\n✔ 情節重大可吊扣牌照\n✔ 一年內再犯可吊扣牌照六個月', wrap:true, size:'md', color:'#092b5f'},
+      {type:'text', text:'輸入「修法」可看修法重點與舊法/新法差異。', size:'xs', color:'#6b7788', wrap:true}
+    ]}, footer:{type:'box', layout:'vertical', spacing:'sm', contents:[lawButton('查看修法重點','修法','#c2272d'), flexUriButton('環境部公告', lawSources.moenvRevision, '#54606f')] }},
+    { type:'bubble', size:'mega', header:{type:'box', layout:'vertical', backgroundColor:'#073b82', paddingAll:'18px', contents:[{type:'text', text:'📖 常用法條', color:'#fff', weight:'bold', size:'lg'}, {type:'text', text:'新北噪音車執法常查條文', color:'#d9ecff', size:'sm'}]}, body:{type:'box', layout:'vertical', spacing:'sm', contents:[
+      iconText('11','第11條','車輛噪音標準'), iconText('13','第13條','通知到檢'), iconText('26','第26條','裁罰規定'), iconText('28','第28條','未依通知檢驗')
+    ]}, footer:{type:'box', layout:'vertical', spacing:'sm', contents:[lawButton('查第26條','法條26','#073b82'), lawButton('查第28條','法條28','#073b82')] }},
+    { type:'bubble', size:'mega', header:{type:'box', layout:'vertical', backgroundColor:'#6f4be6', paddingAll:'18px', contents:[{type:'text', text:'🧭 修法重點', color:'#fff', weight:'bold', size:'lg'}, {type:'text', text:'快速掌握政策風險與執法重點', color:'#efe8ff', size:'sm'}]}, body:{type:'box', layout:'vertical', spacing:'md', contents:[
+      {type:'text', text:'輸入「修法」即可查看：\n✓ 修法原因\n✓ 修法日期\n✓ 修法重點\n✓ 舊法 vs 新法', wrap:true, size:'md', color:'#092b5f'}
+    ]}, footer:{type:'box', layout:'vertical', contents:[lawButton('查看修法', '修法', '#6f4be6')]}},
+    { type:'bubble', size:'mega', header:{type:'box', layout:'vertical', backgroundColor:'#009b72', paddingAll:'18px', contents:[{type:'text', text:'📰 噪音車新聞', color:'#fff', weight:'bold', size:'lg'}, {type:'text', text:'環境部、噪音車專區、中央社', color:'#dbfff5', size:'sm'}]}, body:{type:'box', layout:'vertical', spacing:'sm', contents:[
+      iconText('新','新北/地方治理','科技執法與陳情趨勢'), iconText('環','環境部','法規、政策與聲音照相'), iconText('院','國環院','檢測機構、比測與技術資料')
+    ]}, footer:{type:'box', layout:'vertical', spacing:'sm', contents:[lawButton('今日新聞摘要','噪音車新聞','#009b72'), flexUriButton('噪音車專區', lawSources.noiseCar, '#54606f')] }}
+  ] }};
+}
+function getLawArticleText(articleNo) {
+  const t = lawArticles[articleNo];
+  if (!t) return '目前支援查詢：法條11、法條13、法條26、法條28。';
+  return `📖 噪音管制法 ${articleNo}條\n\n${t}\n\n資料來源：環境部法規查詢、全國法規資料庫。`;
+}
+function getRevisionText() {
+  return '🚨 噪音管制法最新修法重點\n\n修法目的：提高車輛噪音違規處罰強度，壓制非法改裝與高噪音擾民。\n\n重點整理：\n1. 車輛噪音違規罰鍰提高至新臺幣3,600元至36,000元。\n2. 情節重大者，可移請監理機關吊扣牌照至改善完成。\n3. 一年內再犯者，可吊扣牌照六個月。\n4. 未依通知檢驗或檢驗不合格，亦適用3,600元至36,000元罰鍰。\n\n舊法 vs 新法：\n舊法偏重罰鍰與限期改善；新法增加吊扣牌照工具，對累犯與重大違規更有嚇阻性。';
+}
+function getNoiseNewsText() {
+  return `📰 噪音車新聞與政策來源\n\n我目前可提供新聞入口與重點摘要。正式每日自動新聞推播，建議搭配 n8n 每日排程更新。\n\n建議追蹤來源：\n1. 環境部最新消息\n${lawSources.moenvRevision}\n\n2. 環境部噪音車專區\n${lawSources.noiseCar}\n\n3. 中央社噪音車搜尋\n${lawSources.cnaSearch}\n\n4. 國環院檢測機構查詢\n${lawSources.nera}`;
+}
+
+function getEquipmentDashboardFlex() {
+  const summary = equipmentSummary();
+  const alerts = summary.alerts.slice(0, 5);
+  return { type:'flex', altText:'設備管理提醒', contents:{ type:'bubble', size:'mega',
+    header:{ type:'box', layout:'vertical', backgroundColor:'#1f6f8b', paddingAll:'18px', contents:[
+      { type:'text', text:'🔧 設備管理', color:'#fff', weight:'bold', size:'lg' },
+      { type:'text', text:'比測、噪音計檢定、風速計檢定到期提醒', color:'#d8f7ff', size:'sm', wrap:true }
+    ]},
+    body:{ type:'box', layout:'vertical', spacing:'md', paddingAll:'16px', contents:[
+      { type:'box', layout:'horizontal', spacing:'sm', contents:[
+        { type:'box', layout:'vertical', backgroundColor:'#e8fff3', cornerRadius:'12px', paddingAll:'12px', contents:[{type:'text', text:'🟢 正常', size:'sm', weight:'bold'}, {type:'text', text:String(summary.green), size:'xxl', weight:'bold', color:'#009b72'}]},
+        { type:'box', layout:'vertical', backgroundColor:'#fff8dc', cornerRadius:'12px', paddingAll:'12px', contents:[{type:'text', text:'🟡 30天內', size:'sm', weight:'bold'}, {type:'text', text:String(summary.yellow), size:'xxl', weight:'bold', color:'#c98a00'}]},
+        { type:'box', layout:'vertical', backgroundColor:'#ffecec', cornerRadius:'12px', paddingAll:'12px', contents:[{type:'text', text:'🔴 已逾期', size:'sm', weight:'bold'}, {type:'text', text:String(summary.red), size:'xxl', weight:'bold', color:'#c2272d'}]}
+      ]},
+      { type:'separator' },
+      ...(alerts.length ? alerts.map(e => iconText(e.icon, `${e.equipmentId}｜${e.priorityItem}`, `${e.status}｜到期日 ${e.priorityDueDate}`)) : [iconText('🟢','目前無到期警示','全部設備維持正常。')]),
+      { type:'text', text:'提醒規則：中央比測2年、噪音計檢定1年、風速計檢定1年；30天內亮黃燈，逾期亮紅燈。', size:'xs', color:'#6b7788', wrap:true }
+    ]},
+    footer:{ type:'box', layout:'vertical', spacing:'sm', contents:[flexButton('查看設備清單','設備清單','#1f6f8b'), flexButton('推播今日提醒','設備提醒推播','#c2272d')] }
+  }};
+}
+function getEquipmentListText() {
+  const list = getEquipmentList().slice(0, 12);
+  const lines = list.map(e => `${e.icon} ${e.equipmentId}｜${e.priorityItem}｜${e.status}｜${e.priorityDueDate}`).join('\n');
+  return `📋 設備清單\n${lines || '目前尚無設備資料'}\n\n輸入「設備 OE_ZB004」可查看單一機台完整檢定狀態。`;
+}
+function formatEquipmentDetailText(machineNo) {
+  const key = norm(machineNo).toUpperCase();
+  const e = getEquipmentList().find(x => x.equipmentId.toUpperCase() === key || x.machineNo.toUpperCase() === key);
+  if (!e) return `查無設備 ${key}。可輸入「設備清單」查看目前建檔設備。`;
+  const lines = e.items.map(i => `${i.icon} ${i.label}\n上次日期：${i.lastDate}\n下次期限：${i.dueDate}\n狀態：${i.status}`).join('\n\n');
+  return `🔧 設備：${e.equipmentId}\n狀態：${e.icon} ${e.status}\n地點：${e.location || '-'}\n\n${lines}\n\n建議：${e.level==='red'?'已逾期，請立即安排送檢/比測。':e.level==='yellow'?'30天內到期，建議先排程送檢。':'目前正常，持續追蹤即可。'}`;
+}
+function equipmentReminderText() {
+  const summary = equipmentSummary();
+  const alerts = summary.alerts;
+  if (!alerts.length) return `🔔 今日設備提醒\n\n🟢 目前沒有 30 天內到期或逾期設備。\n\n設備總數：${summary.total}`;
+  return `🔔 今日設備提醒\n\n${alerts.slice(0,10).map(e => `${e.icon} ${e.equipmentId}\n${e.priorityItem}\n${e.status}\n到期日：${e.priorityDueDate}`).join('\n────────\n')}\n\n設備總數：${summary.total}\n🟢正常 ${summary.green}｜🟡30天內 ${summary.yellow}｜🔴逾期 ${summary.red}`;
+}
+async function pushLine(to, messages) {
+  if (!LINE_TOKEN || !to) return;
+  await fetch('https://api.line.me/v2/bot/message/push', { method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${LINE_TOKEN}` }, body: JSON.stringify({ to, messages: Array.isArray(messages) ? messages : [messages] }) });
+}
+async function pushEquipmentReminders() {
+  const store = readStore();
+  const ids = [...new Set([...(store.lineUsers||[]), ...(process.env.LINE_PUSH_USER_IDS||'').split(',').map(s=>s.trim()).filter(Boolean)])];
+  const msg = { type:'text', text: equipmentReminderText() };
+  for (const id of ids) await pushLine(id, msg);
+  return ids.length;
+}
+let lastReminderDate = '';
+setInterval(async () => {
+  try {
+    const tw = new Date(new Date().toLocaleString('en-US', { timeZone:'Asia/Taipei' }));
+    const day = tw.toISOString().slice(0,10);
+    if (tw.getHours() === 8 && tw.getMinutes() < 15 && lastReminderDate !== day) {
+      lastReminderDate = day;
+      await pushEquipmentReminders();
+    }
+  } catch (e) { console.error('daily equipment reminder failed', e); }
+}, 5 * 60 * 1000);
 
 async function replyLine(replyToken, messages) {
   if (!LINE_TOKEN || !replyToken) return;
@@ -648,6 +935,7 @@ app.post('/api/line/webhook', async (req, res) => {
   for (const event of events) {
     if (event.type !== 'message' || event.message?.type !== 'text') continue;
     const userId = event.source?.userId || 'unknown';
+    rememberLineUser(userId);
     const text = event.message.text || '';
     const state = lineStates.get(userId);
     try {
@@ -661,32 +949,49 @@ app.post('/api/line/webhook', async (req, res) => {
       }
 
       const cmd = parseLineCommand(text);
-      if (cmd.wantsMenu) await replyLine(event.replyToken, getLineHomeFlex());
+      if (/法規中心|法規|法律中心/.test(text)) await replyLine(event.replyToken, getLawCenterFlex());
+      else if (/最新修法|修法重點|修法/.test(text)) await replyLine(event.replyToken, { type:'text', text:getRevisionText() });
+      else if (/法條\s*(11|13|26|28)/.test(text)) await replyLine(event.replyToken, { type:'text', text:getLawArticleText(text.match(/法條\s*(11|13|26|28)/)[1]) });
+      else if (/噪音車新聞|今日新聞|新聞/.test(text)) await replyLine(event.replyToken, { type:'text', text:getNoiseNewsText() });
+      else if (/設備管理|設備儀表板|設備$/.test(text)) await replyLine(event.replyToken, getEquipmentDashboardFlex());
+      else if (/設備清單|設備列表/.test(text)) await replyLine(event.replyToken, { type:'text', text:getEquipmentListText() });
+      else if (/設備提醒推播|推播今日提醒/.test(text)) { const n = await pushEquipmentReminders(); await replyLine(event.replyToken, { type:'text', text:`已發送設備提醒給 ${n} 位已互動使用者。` }); }
+      else if (/設備\s*([A-Za-z0-9_\-]+)/.test(text)) await replyLine(event.replyToken, { type:'text', text:formatEquipmentDetailText(text.match(/設備\s*([A-Za-z0-9_\-]+)/)[1]) });
+      else if (cmd.wantsMenu) await replyLine(event.replyToken, getLineHomeFlex());
       else if (cmd.wantsResultsMenu) await replyLine(event.replyToken, getResultsMenuText());
+      else if (/統計選單|月份行政區|月份\/行政區/.test(text)) await replyLine(event.replyToken, getStatsSelectFlex());
       else if (cmd.wantsFieldLine) await replyLine(event.replyToken, startFieldReport(userId));
       else if (cmd.wantsFieldStart) await replyLine(event.replyToken, getFieldReportMenu());
-      else if (cmd.wantsAdmin) { lineStates.set(userId, { mode:'admin_wait' }); await replyLine(event.replyToken, { type:'text', text:'請輸入管理密碼。' }); }
+      else if (cmd.wantsAdmin) { lineStates.set(userId, { mode:'admin_wait' }); await replyLine(event.replyToken, { type:'text', text:'🔐 請輸入管理密碼。' }); }
       else if (/匯出Excel/.test(text)) await replyLine(event.replyToken, { type:'text', text:`Excel匯出需管理登入後下載：${PUBLIC_BASE_URL}/admin.html` });
       else if (/開啟成果系統|成果系統連結|成果平台/.test(text)) await replyLine(event.replyToken, { type:'flex', altText:'開啟成果查詢系統', contents:{ type:'bubble', body:{ type:'box', layout:'vertical', spacing:'md', contents:[{type:'text', text:'成果查詢系統', weight:'bold', size:'lg', color:'#092b5f'}, {type:'text', text:'點選下方按鈕開啟成果查詢平台。', size:'sm', color:'#516070'}]}, footer:{ type:'box', layout:'vertical', contents:[flexUriButton('開啟成果查詢', DASHBOARD_URL)] } } });
       else if (/開啟外勤回報|外勤回報連結|外勤平台/.test(text)) await replyLine(event.replyToken, { type:'flex', altText:'開啟外勤回報平台', contents:{ type:'bubble', body:{ type:'box', layout:'vertical', spacing:'md', contents:[{type:'text', text:'外勤回報平台', weight:'bold', size:'lg', color:'#092b5f'}, {type:'text', text:'點選下方按鈕開啟外勤回報表單。', size:'sm', color:'#516070'}]}, footer:{ type:'box', layout:'vertical', contents:[flexUriButton('開啟外勤回報', FIELD_REPORT_URL, '#009b72')] } } });
       else if (/平台後台/.test(text)) await replyLine(event.replyToken, { type:'text', text:`管理後台：${PUBLIC_BASE_URL}/admin.html` });
-      else if (cmd.wantsMonthMenu) await replyLine(event.replyToken, { type:'text', text:'請選擇月份：', quickReply: quickReply(Array.from({length:12},(_,i)=>[`${i+1}月`, `${i+1}月份執行成效`])) });
+      else if (cmd.wantsMonthMenu) await replyLine(event.replyToken, { type:'text', text:'📅 請選擇要查詢的月份，我會整理場次、告發、通檢與 KPI 給你。', quickReply: quickReply(Array.from({length:12},(_,i)=>[`${i+1}月`, `${i+1}月份執行成效`])) });
       else if (cmd.wantsDistrictMenu) {
         const districts = computeStats({}).districts.map(d=>d.name).slice(0,12);
-        await replyLine(event.replyToken, { type:'text', text:'請選擇行政區：', quickReply: quickReply(districts.map(d=>[d, `${d}執行成效`])) });
+        await replyLine(event.replyToken, { type:'text', text:'🏙 請選擇行政區，我會回覆該區執行成果與 KPI。', quickReply: quickReply(districts.map(d=>[d, `${d}執行成效`])) });
       }
       else if (cmd.wantsTimeMenu) await replyLine(event.replyToken, { type:'text', text: formatRankingText('time') });
-      else if (cmd.wantsPlateStart) { lineStates.set(userId, { mode:'plate_wait' }); await replyLine(event.replyToken, { type:'text', text:'請輸入車牌號碼，例如 ABC-1234。' }); }
+      else if (cmd.wantsPlateStart) { lineStates.set(userId, { mode:'plate_wait' }); await replyLine(event.replyToken, { type:'text', text:'🚗 請輸入車牌號碼，例如 ABC-1234。\n我會協助查詢累犯、最高超標與案件紀錄。' }); }
       else if (cmd.plate) await replyLine(event.replyToken, { type: 'text', text: formatPlateText(cmd.plate) });
       else if (cmd.wantsKpi || cmd.wantsProgress) await replyLine(event.replyToken, formatProgressCard({ month: cmd.month, district: cmd.district }));
       else if (cmd.wantsStats) await replyLine(event.replyToken, { type: 'text', text: formatStatsForLine({ month: cmd.month, district: cmd.district }) });
-      else await replyLine(event.replyToken, { type: 'text', text: '請點下方「管理選單」，或輸入：成果查詢、開始回報、KPI報表、車號查詢、2月份執行成效、淡水區執行成效。' });
+      else await replyLine(event.replyToken, { type: 'text', text: '我目前可以協助你查詢成果、KPI、月份、行政區、車號，也可以啟動外勤回報。\n\n請點下方「管理選單」，或輸入：成果查詢、外勤回報、KPI報表、車號查詢、2月份執行成效、淡水區執行成效。' });
     } catch (error) {
       console.error('LINE reply failed', error);
     }
   }
 });
 
+
+
+app.post('/api/admin/line/push/equipment-reminder', requireAdmin, async (_req, res) => {
+  try {
+    const count = await pushEquipmentReminders();
+    res.json({ ok:true, count, message:`已推播設備提醒給 ${count} 位已互動使用者` });
+  } catch (error) { res.status(500).json({ ok:false, message:error.message }); }
+});
 
 app.get('/api/admin/line/rich-menu/status', requireAdmin, async (_req, res) => {
   try {
@@ -720,22 +1025,25 @@ app.get('/api/line/rich-menu-spec', (_req, res) => {
 });
 
 function buildRichMenuSpec(_base) {
-  const W = 2500, H = 1686, header = 280, margin = 70, gap = 34;
-  const tw = Math.floor((W - 2*margin - 2*gap) / 3);
-  const th = Math.floor((H - header - 2*margin - gap) / 2);
+  const W = 2500, H = 1686, header = 230, margin = 54, gap = 28;
+  const cols = 4, rows = 2;
+  const tw = Math.floor((W - 2*margin - (cols-1)*gap) / cols);
+  const th = Math.floor((H - header - 2*margin - (rows-1)*gap) / rows);
   const actions = [
     { type:'uri', uri:DASHBOARD_URL },
     { type:'uri', uri:FIELD_REPORT_URL },
     { type:'message', text:'車號查詢' },
     { type:'message', text:'KPI報表' },
-    { type:'message', text:'行政區統計' },
+    { type:'message', text:'統計選單' },
+    { type:'message', text:'法規中心' },
+    { type:'message', text:'設備管理' },
     { type:'message', text:'管理功能' }
   ];
   const areas = actions.map((action,i)=>{
-    const c=i%3, r=Math.floor(i/3);
+    const c=i%cols, r=Math.floor(i/cols);
     return { bounds:{ x: margin + c*(tw+gap), y: header + margin + r*(th+gap), width: tw, height: th }, action };
   });
-  return { size: { width: W, height: H }, selected: true, name: '新北噪音車V5圖文選單', chatBarText: '管理選單', areas };
+  return { size: { width: W, height: H }, selected: true, name: '新北噪音車V9智慧版圖文選單', chatBarText: '管理選單', areas };
 }
 
 app.use((err, _req, res, _next) => {
