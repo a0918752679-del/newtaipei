@@ -81,14 +81,14 @@ function monthFromDate(dateStr) {
 function recordDayKey(r) { return `${r.date || ''}_${r.sessionNo || r.id || ''}`; }
 
 function filterRecords(records, query = {}) {
-  const month = number(query.month, 0);
-  const district = norm(query.district);
+  const monthValues = norm(query.month).split(',').map(v=>number(v,0)).filter(Boolean);
+  const districtValues = norm(query.district).split(',').map(v=>norm(v)).filter(v=>v && v !== '全部');
   const timePeriod = norm(query.timePeriod);
   const plate = norm(query.plate || query.plateNo).toUpperCase();
   const keyword = norm(query.keyword).toLowerCase();
   return records.filter(r => {
-    if (month && Number(r.month || monthFromDate(r.date)) !== month) return false;
-    if (district && district !== '全部' && r.district !== district) return false;
+    if (monthValues.length && !monthValues.includes(Number(r.month || monthFromDate(r.date)))) return false;
+    if (districtValues.length && !districtValues.includes(r.district)) return false;
     if (timePeriod && timePeriod !== '全部' && r.timePeriod !== timePeriod) return false;
     if (plate && !norm(r.plateNo).toUpperCase().includes(plate)) return false;
     if (keyword) {
@@ -130,10 +130,12 @@ function computeStats(query = {}) {
   const store = readStore();
   const records = filterRecords(store.records, query);
   const base = summarizeRows(records);
+  const queryRecordCount = records.length;
   const completed = new Set(store.records.map(recordDayKey)).size;
   const goal = number(store.settings?.annualGoal, ANNUAL_GOAL);
   const remaining = Math.max(goal - completed, 0);
   const progressRate = goal ? completed / goal : 0;
+  const projectProgress = { goal, completed, remaining, progressRate };
   const monthly = groupBy(records, r => `${Number(r.month || monthFromDate(r.date))}月`, (name, rows) => ({ name, ...summarizeRows(rows) }))
     .sort((a, b) => number(a.name) - number(b.name));
   const districts = groupBy(records, r => r.district, (name, rows) => ({ name, ...summarizeRows(rows) }))
@@ -153,7 +155,7 @@ function computeStats(query = {}) {
       ...s
     };
   }).sort((a, b) => b.maxDbOver - a.maxDbOver || b.records - a.records);
-  return { updatedAt: store.updatedAt, goal, completed, remaining, progressRate, filters: query, total: base, monthly, districts, timePeriods, plates, recent: records.slice(-30).reverse() };
+  return { updatedAt: store.updatedAt, goal, completed, remaining, progressRate, projectProgress, queryRecordCount, filters: query, total: base, monthly, districts, timePeriods, plates, recent: records.slice(-30).reverse() };
 }
 
 function firstOf(obj, keys) {
@@ -204,7 +206,7 @@ function normalizeImportedRow(row, index) {
   };
 }
 
-app.get('/healthz', (_req, res) => res.json({ ok: true, service: 'newtaipei-noise-control-system-v12-ultimate' }));
+app.get('/healthz', (_req, res) => res.json({ ok: true, service: 'newtaipei-noise-control-system-v13-ultimate' }));
 app.get('/api/meta', (_req, res) => {
   const store = readStore();
   res.json({
@@ -494,7 +496,7 @@ async function lineApi(pathname, options = {}) {
 
 async function createAndSetDefaultRichMenu() {
   const spec = buildRichMenuSpec(PUBLIC_BASE_URL);
-  spec.name = '新北噪音車V12 Ultimate企業版圖文選單';
+  spec.name = '新北噪音車V13 Ultimate科技版圖文選單';
 
   // 先建立新的 Rich Menu
   const created = await lineApi('/v2/bot/richmenu', {
@@ -627,10 +629,47 @@ function getStatsSelectFlex() {
   };
 }
 
+
+function getMonthSelectFlex() {
+  const stats = computeStats({});
+  const months = stats.monthly.length ? stats.monthly.map(m => Number(String(m.name).replace('月',''))).filter(Boolean) : [1,2,3,4,5,6];
+  const rows = [];
+  for (let i=0; i<months.length; i+=2) {
+    const a = months[i], b = months[i+1];
+    rows.push({ type:'box', layout:'horizontal', spacing:'sm', contents:[
+      flexButton(`${a}月`, `${a}月份執行成效`, '#0b62d6'),
+      b ? flexButton(`${b}月`, `${b}月份執行成效`, '#0b62d6') : { type:'filler' }
+    ]});
+  }
+  return { type:'flex', altText:'月份查詢', quickReply: quickReply(months.map(m=>[`${m}月`, `${m}月份執行成效`])), contents:{ type:'bubble', size:'mega',
+    header:{ type:'box', layout:'vertical', backgroundColor:'#073b82', paddingAll:'18px', contents:[
+      { type:'text', text:'📅 月份查詢', color:'#ffffff', weight:'bold', size:'lg' },
+      { type:'text', text:'直接點月份，我會回覆該月份完整成果。', color:'#d9ecff', size:'sm', wrap:true }
+    ]},
+    body:{ type:'box', layout:'vertical', spacing:'sm', paddingAll:'16px', contents: rows }
+  }};
+}
+
+function getDistrictSelectFlex() {
+  const districts = computeStats({}).districts.map(d=>d.name).filter(Boolean);
+  const chunks = [];
+  for (let i=0; i<districts.length; i+=8) chunks.push(districts.slice(i, i+8));
+  const bubbles = (chunks.length ? chunks : [['板橋區','三重區','新莊區','淡水區']]).map((chunk, idx)=>({
+    type:'bubble', size:'mega',
+    header:{ type:'box', layout:'vertical', backgroundColor: idx===0 ? '#6f4be6' : '#0b62d6', paddingAll:'18px', contents:[
+      { type:'text', text: idx===0 ? '🏙 行政區查詢' : `🏙 行政區查詢 ${idx+1}`, color:'#ffffff', weight:'bold', size:'lg' },
+      { type:'text', text:'點選行政區後，直接回覆場次、告發、通檢與 KPI。', color:'#efe8ff', size:'sm', wrap:true }
+    ]},
+    body:{ type:'box', layout:'vertical', spacing:'sm', paddingAll:'16px', contents: chunk.map(d => flexButton(d, `${d}執行成效`, idx===0 ? '#6f4be6' : '#0b62d6')) }
+  }));
+  return { type:'flex', altText:'行政區查詢', quickReply: quickReply(districts.slice(0,13).map(d=>[d, `${d}執行成效`])), contents:{ type:'carousel', contents:bubbles.slice(0, 10) } };
+}
+
 function getResultsMenuText() {
   return {
     type: 'flex',
     altText: '成果查詢選單',
+    quickReply: quickReply([["月份","月份統計"],["行政區","行政區統計"],["KPI","KPI報表"],["車號","車號查詢"]]),
     contents: {
       type: 'bubble', size: 'mega',
       header: { type:'box', layout:'vertical', backgroundColor:'#073b82', paddingAll:'18px', contents:[
@@ -651,23 +690,29 @@ function getResultsMenuText() {
 
 function formatProgressCard(query = {}) {
   const stats = computeStats(query);
+  const hasFilter = Boolean(query.month || query.district || query.timePeriod || query.plate);
   const title = [query.month ? `${query.month}月` : '', query.district || '', query.timePeriod || ''].filter(Boolean).join('｜') || '全計畫';
+  const topLine = hasFilter
+    ? `查詢範圍：${stats.total.sessions}場｜資料筆數 ${stats.queryRecordCount}`
+    : `年度進度：${stats.projectProgress.completed}/${stats.projectProgress.goal}場（${(stats.projectProgress.progressRate*100).toFixed(1)}%）`;
   return {
     type: 'flex', altText: `${title}執行成效`,
+    quickReply: quickReply([['月份','月份統計'],['行政區','行政區統計'],['KPI','KPI報表'],['車號','車號查詢']]),
     contents: {
       type: 'bubble', size: 'mega',
-      header: { type:'box', layout:'vertical', backgroundColor:'#073b82', contents:[
+      header: { type:'box', layout:'vertical', backgroundColor:'#073b82', paddingAll:'18px', contents:[
         { type:'text', text:`${title} 執行成效`, weight:'bold', color:'#ffffff', size:'lg' },
-        { type:'text', text:`更新：${(stats.updatedAt || '').slice(0,10) || '即時資料'}`, color:'#d9ecff', size:'xs' }
+        { type:'text', text:`全計畫 ${stats.projectProgress.completed}/${stats.projectProgress.goal}場｜更新 ${(stats.updatedAt || '').slice(0,10) || '即時資料'}`, color:'#d9ecff', size:'xs', wrap:true }
       ]},
-      body: { type:'box', layout:'vertical', spacing:'sm', contents:[
-        { type:'text', text:`年度進度：${stats.completed}/${stats.goal}場（${(stats.progressRate*100).toFixed(1)}%）`, weight:'bold', size:'md', color:'#092b5f' },
+      body: { type:'box', layout:'vertical', spacing:'sm', paddingAll:'16px', contents:[
+        { type:'text', text:topLine, weight:'bold', size:'md', color:'#092b5f', wrap:true },
         { type:'separator', margin:'sm' },
         ...[
           ['執行場次', `${stats.total.sessions}場`], ['車流辨識', `${stats.total.detectCount.toLocaleString()}件`],
           ['超標件數', `${stats.total.exceedCount.toLocaleString()}件`], ['告發件數', `${stats.total.citationCount.toLocaleString()}件`],
-          ['通知到檢', `${stats.total.inspectionCount.toLocaleString()}件`], ['告發率', `${(stats.total.citationRate*100).toFixed(1)}%`],
-          ['通檢率', `${(stats.total.inspectionRate*100).toFixed(1)}%`], ['KPI成效', stats.total.kpi.toFixed(2)]
+          ['通知到檢', `${stats.total.inspectionCount.toLocaleString()}件`], ['成案件數', `${stats.total.caseCount.toLocaleString()}件`],
+          ['告發率', `${(stats.total.citationRate*100).toFixed(1)}%`], ['通檢率', `${(stats.total.inspectionRate*100).toFixed(1)}%`],
+          ['KPI成效', stats.total.kpi.toFixed(2)]
         ].map(([k,v]) => ({ type:'box', layout:'horizontal', contents:[
           { type:'text', text:k, color:'#516070', size:'sm', flex:3 }, { type:'text', text:v, color:'#0b2f6b', size:'sm', weight:'bold', align:'end', flex:4 }
         ]}))
@@ -806,10 +851,29 @@ function adminMenuText() {
 function formatStatsForLine(query) {
   const stats = computeStats(query);
   const label = [query.month ? `${query.month}月` : '', query.district || '', query.plate ? `車號 ${query.plate}` : ''].filter(Boolean).join('｜') || '全計畫';
-  const plateLine = query.plate && stats.plates[0] ? `\n🚗 車號追蹤：${stats.plates[0].plateNo}\n🔁 累犯判定：${stats.plates[0].repeatOffender ? '是' : '否'}｜最高超標：${stats.plates[0].maxDbOver.toFixed(1)} dB` : '';
-  return `📊【${label} 執行成效】\n已完成：${stats.completed}/${stats.goal}場（${(stats.progressRate*100).toFixed(1)}%）\n查詢筆數：${stats.recent.length}筆\n\n📍 執行場次：${stats.total.sessions}場\n🚘 車流辨識：${stats.total.detectCount.toLocaleString()}件\n🔊 超標件數：${stats.total.exceedCount.toLocaleString()}件\n⚖️ 告發件數：${stats.total.citationCount.toLocaleString()}件\n📄 通知到檢：${stats.total.inspectionCount.toLocaleString()}件\n\n📈 告發率：${(stats.total.citationRate*100).toFixed(1)}%\n📋 通檢率：${(stats.total.inspectionRate*100).toFixed(1)}%\n🎯 KPI成效：${stats.total.kpi.toFixed(2)}${plateLine}\n\n我也可以協助查「月份統計」或「行政區統計」。`;
-}
+  const plateLine = query.plate && stats.plates[0] ? `
+🚗 車號追蹤：${stats.plates[0].plateNo}
+🔁 累犯判定：${stats.plates[0].repeatOffender ? '是' : '否'}｜最高超標：${stats.plates[0].maxDbOver.toFixed(1)} dB` : '';
+  const scopeLine = (query.month || query.district || query.plate)
+    ? `全計畫進度：${stats.projectProgress.completed}/${stats.projectProgress.goal}場（${(stats.projectProgress.progressRate*100).toFixed(1)}%）
+查詢範圍：${stats.total.sessions}場｜資料筆數：${stats.queryRecordCount}筆`
+    : `年度進度：${stats.projectProgress.completed}/${stats.projectProgress.goal}場（${(stats.projectProgress.progressRate*100).toFixed(1)}%）`;
+  return `📊【${label} 執行成效】
+${scopeLine}
 
+📍 執行場次：${stats.total.sessions}場
+🚘 車流辨識：${stats.total.detectCount.toLocaleString()}件
+🔊 超標件數：${stats.total.exceedCount.toLocaleString()}件
+⚖️ 告發件數：${stats.total.citationCount.toLocaleString()}件
+📄 通知到檢：${stats.total.inspectionCount.toLocaleString()}件
+🧾 成案件數：${stats.total.caseCount.toLocaleString()}件
+
+📈 告發率：${(stats.total.citationRate*100).toFixed(1)}%
+📋 通檢率：${(stats.total.inspectionRate*100).toFixed(1)}%
+🎯 KPI成效：${stats.total.kpi.toFixed(2)}${plateLine}
+
+我也可以協助查「月份統計」或「行政區統計」。`;
+}
 
 const lawSources = {
   moenvRevision: 'https://air.moenv.gov.tw/News/news.aspx?ID=6442',
@@ -961,12 +1025,14 @@ async function replyLine(replyToken, messages) {
   if (!response.ok) throw new Error(`LINE Reply API failed ${response.status}: ${body}`);
 }
 
-app.get('/api/line/test', (_req, res) => res.json({ ok: true, service: 'newtaipei-noise-control-system-v12-ultimate', message: 'LINE BOT OK', hasToken: !!LINE_TOKEN, hasSecret: !!LINE_SECRET }));
+app.get('/api/line/test', (_req, res) => res.json({ ok: true, service: 'newtaipei-noise-control-system-v13-ultimate', message: 'LINE BOT OK', hasToken: !!LINE_TOKEN, hasSecret: !!LINE_SECRET }));
 app.get('/api/line/debug/latest', (_req, res) => res.json({ ok: true, debug: lineDebug }));
 
 app.get('/api/debug/flex/law', (_req, res) => res.json({ ok:true, sample:'law-center', message:getLawCenterFlex() }));
 app.get('/api/debug/flex/equipment', (_req, res) => res.json({ ok:true, sample:'equipment-dashboard', message:getEquipmentDashboardFlex() }));
 app.get('/api/debug/flex/kpi', (_req, res) => res.json({ ok:true, sample:'kpi-progress', message:formatProgressCard({}) }));
+app.get('/api/debug/flex/months', (_req, res) => res.json({ ok:true, sample:'month-select', message:getMonthSelectFlex() }));
+app.get('/api/debug/flex/districts', (_req, res) => res.json({ ok:true, sample:'district-select', message:getDistrictSelectFlex() }));
 app.get('/api/line/webhook', (_req, res) => res.status(405).send('LINE webhook endpoint is ready. Use POST from LINE Messaging API.'));
 
 app.post('/api/line/webhook', async (req, res) => {
@@ -1019,11 +1085,8 @@ app.post('/api/line/webhook', async (req, res) => {
       else if (/開啟成果系統|成果系統連結|成果平台/.test(text)) await replyLine(event.replyToken, { type:'flex', altText:'開啟成果查詢系統', contents:{ type:'bubble', body:{ type:'box', layout:'vertical', spacing:'md', contents:[{type:'text', text:'成果查詢系統', weight:'bold', size:'lg', color:'#092b5f'}, {type:'text', text:'點選下方按鈕開啟成果查詢平台。', size:'sm', color:'#516070'}]}, footer:{ type:'box', layout:'vertical', contents:[flexUriButton('開啟成果查詢', DASHBOARD_URL)] } } });
       else if (/開啟外勤回報|外勤回報連結|外勤平台/.test(text)) await replyLine(event.replyToken, { type:'flex', altText:'開啟外勤回報平台', contents:{ type:'bubble', body:{ type:'box', layout:'vertical', spacing:'md', contents:[{type:'text', text:'外勤回報平台', weight:'bold', size:'lg', color:'#092b5f'}, {type:'text', text:'點選下方按鈕開啟外勤回報表單。', size:'sm', color:'#516070'}]}, footer:{ type:'box', layout:'vertical', contents:[flexUriButton('開啟外勤回報', FIELD_REPORT_URL, '#009b72')] } } });
       else if (/平台後台/.test(text)) await replyLine(event.replyToken, { type:'text', text:`管理後台：${PUBLIC_BASE_URL}/admin.html` });
-      else if (cmd.wantsMonthMenu) await replyLine(event.replyToken, { type:'text', text:'📅 請選擇要查詢的月份，我會整理場次、告發、通檢與 KPI 給你。', quickReply: quickReply(Array.from({length:12},(_,i)=>[`${i+1}月`, `${i+1}月份執行成效`])) });
-      else if (cmd.wantsDistrictMenu) {
-        const districts = computeStats({}).districts.map(d=>d.name).slice(0,12);
-        await replyLine(event.replyToken, { type:'text', text:'🏙 請選擇行政區，我會回覆該區執行成果與 KPI。', quickReply: quickReply(districts.map(d=>[d, `${d}執行成效`])) });
-      }
+      else if (cmd.wantsMonthMenu) await replyLine(event.replyToken, getMonthSelectFlex());
+      else if (cmd.wantsDistrictMenu) await replyLine(event.replyToken, getDistrictSelectFlex());
       else if (cmd.wantsTimeMenu) await replyLine(event.replyToken, { type:'text', text: formatRankingText('time') });
       else if (cmd.wantsPlateStart) { lineStates.set(userId, { mode:'plate_wait' }); await replyLine(event.replyToken, { type:'text', text:'🚗 請輸入車牌號碼，例如 ABC-1234。\n我會協助查詢累犯、最高超標與案件紀錄。' }); }
       else if (cmd.plate) await replyLine(event.replyToken, { type: 'text', text: formatPlateText(cmd.plate) });
@@ -1096,7 +1159,7 @@ function buildRichMenuSpec(_base) {
     const c=i%cols, r=Math.floor(i/cols);
     return { bounds:{ x: margin + c*(tw+gap), y: header + margin + r*(th+gap), width: tw, height: th }, action };
   });
-  return { size: { width: W, height: H }, selected: true, name: '新北噪音車V12 Ultimate企業版圖文選單', chatBarText: '管理選單', areas };
+  return { size: { width: W, height: H }, selected: true, name: '新北噪音車V13 Ultimate科技版圖文選單', chatBarText: '管理選單', areas };
 }
 
 app.use((err, _req, res, _next) => {

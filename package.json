@@ -1,8 +1,8 @@
 {
-  "name": "newtaipei-noise-control-system-line-native-v12",
-  "version": "1.6.0",
+  "name": "newtaipei-noise-control-system-line-native-v13",
+  "version": "1.7.0",
   "private": true,
-  "description": "新北市打擊噪音車管理計畫：LINE 原生 V12 Ultimate，修正 Flex Message 400、企業級法規中心與設備管理。",
+  "description": "新北市打擊噪音車管理計畫：LINE 原生 V13 Ultimate，科技風 Rich Menu、LINE 直選月份/行政區、成果篩選修正與數據一致化。",
   "type": "module",
   "scripts": {
     "start": "node server.js",
