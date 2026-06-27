@@ -23,9 +23,25 @@ const LINE_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN || '';
 const LINE_SECRET = process.env.LINE_CHANNEL_SECRET || '';
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
-if (!fs.existsSync(STORE_PATH)) {
-  fs.copyFileSync(SEED_PATH, STORE_PATH);
+function ensureSeedStore() {
+  if (!fs.existsSync(STORE_PATH)) {
+    fs.copyFileSync(SEED_PATH, STORE_PATH);
+    return;
+  }
+  try {
+    const current = JSON.parse(fs.readFileSync(STORE_PATH, 'utf8'));
+    const seed = JSON.parse(fs.readFileSync(SEED_PATH, 'utf8'));
+    const currentVersion = Number(current.version || 0);
+    const seedVersion = Number(seed.version || 0);
+    // V14.1 以上資料包為正式匯入資料；若資料庫仍是舊版，部署時自動升級，避免畫面沿用舊場次。
+    if (seedVersion > currentVersion) {
+      fs.copyFileSync(SEED_PATH, STORE_PATH);
+    }
+  } catch (_e) {
+    fs.copyFileSync(SEED_PATH, STORE_PATH);
+  }
 }
+ensureSeedStore();
 
 const upload = multer({ dest: path.join(DATA_DIR, 'uploads'), limits: { fileSize: 25 * 1024 * 1024 } });
 fs.mkdirSync(path.join(DATA_DIR, 'uploads'), { recursive: true });
@@ -44,6 +60,7 @@ function readStore() {
   data.records ||= [];
   data.fieldReports ||= [];
   data.equipment ||= [];
+  data.plateCases ||= [];
   data.lineUsers ||= [];
   data.settings ||= {};
   return data;
@@ -126,6 +143,23 @@ function summarizeRows(rows) {
   };
 }
 
+function summarizePlateCaseRows(rows) {
+  const citationCount = rows.filter(r => /告發/.test(norm(r.caseType))).length;
+  const inspectionCount = rows.filter(r => /通檢|通知/.test(norm(r.caseType))).length;
+  const caseCount = citationCount + inspectionCount;
+  return {
+    records: rows.length,
+    citationCount,
+    inspectionCount,
+    caseCount,
+    repeatOffender: rows.length >= 2 || caseCount >= 2,
+    maxDbOver: rows.length ? Math.max(...rows.map(r => number(r.dbOver, 0))) : 0,
+    maxDbMeasured: rows.length ? Math.max(...rows.map(r => number(r.dbMeasured, 0))) : 0,
+    lastDate: rows.map(r => r.date).filter(Boolean).sort().at(-1) || '-',
+    districts: [...new Set(rows.map(r => r.district).filter(Boolean))].join('、')
+  };
+}
+
 function computeStats(query = {}) {
   const store = readStore();
   const records = filterRecords(store.records, query);
@@ -142,20 +176,23 @@ function computeStats(query = {}) {
     .sort((a, b) => b.caseCount - a.caseCount);
   const timePeriods = groupBy(records, r => r.timePeriod, (name, rows) => ({ name, ...summarizeRows(rows) }))
     .sort((a, b) => b.caseCount - a.caseCount);
-  const plates = groupBy(records.filter(r => r.plateNo), r => norm(r.plateNo).toUpperCase(), (plateNo, rows) => {
-    const s = summarizeRows(rows);
-    return {
-      plateNo,
-      records: rows.length,
-      repeatOffender: rows.length >= 2 || s.caseCount >= 2,
-      maxDbOver: Math.max(...rows.map(r => number(r.dbOver, 0))),
-      maxDbMeasured: Math.max(...rows.map(r => number(r.dbMeasured, 0))),
-      lastDate: rows.map(r => r.date).sort().at(-1),
-      districts: [...new Set(rows.map(r => r.district).filter(Boolean))].join('、'),
-      ...s
-    };
+  const plateSource = (store.plateCases && store.plateCases.length)
+    ? store.plateCases.filter(r => {
+        const plate = norm(query.plate || query.plateNo).toUpperCase();
+        if (plate && !norm(r.plateNo).toUpperCase().includes(plate)) return false;
+        if (monthValues.length && !monthValues.includes(Number(r.month || monthFromDate(r.date)))) return false;
+        if (districtValues.length && !districtValues.includes(r.district)) return false;
+        return true;
+      })
+    : records.filter(r => r.plateNo);
+  const plates = groupBy(plateSource, r => norm(r.plateNo).toUpperCase(), (plateNo, rows) => {
+    const s = (store.plateCases && store.plateCases.length) ? summarizePlateCaseRows(rows) : summarizeRows(rows);
+    return { plateNo, ...s };
   }).sort((a, b) => b.maxDbOver - a.maxDbOver || b.records - a.records);
-  return { updatedAt: store.updatedAt, goal, completed, remaining, progressRate, projectProgress, queryRecordCount, filters: query, total: base, monthly, districts, timePeriods, plates, recent: records.slice(-30).reverse() };
+  const recentCases = (store.plateCases && store.plateCases.length)
+    ? plateSource.slice(-30).reverse()
+    : records.slice(-30).reverse();
+  return { updatedAt: store.updatedAt, dataVersion: store.dataVersion, goal, completed, remaining, progressRate, projectProgress, queryRecordCount, filters: query, total: base, monthly, districts, timePeriods, plates, recent: recentCases };
 }
 
 function firstOf(obj, keys) {
@@ -206,7 +243,7 @@ function normalizeImportedRow(row, index) {
   };
 }
 
-app.get('/healthz', (_req, res) => res.json({ ok: true, service: 'newtaipei-noise-control-system-v13-ultimate' }));
+app.get('/healthz', (_req, res) => res.json({ ok: true, service: 'newtaipei-noise-control-system-v14.1-clean-updated' }));
 app.get('/api/meta', (_req, res) => {
   const store = readStore();
   res.json({
@@ -1025,7 +1062,7 @@ async function replyLine(replyToken, messages) {
   if (!response.ok) throw new Error(`LINE Reply API failed ${response.status}: ${body}`);
 }
 
-app.get('/api/line/test', (_req, res) => res.json({ ok: true, service: 'newtaipei-noise-control-system-v13-ultimate', message: 'LINE BOT OK', hasToken: !!LINE_TOKEN, hasSecret: !!LINE_SECRET }));
+app.get('/api/line/test', (_req, res) => res.json({ ok: true, service: 'newtaipei-noise-control-system-v14.1-clean-updated', message: 'LINE BOT OK', hasToken: !!LINE_TOKEN, hasSecret: !!LINE_SECRET }));
 app.get('/api/line/debug/latest', (_req, res) => res.json({ ok: true, debug: lineDebug }));
 
 app.get('/api/debug/flex/law', (_req, res) => res.json({ ok:true, sample:'law-center', message:getLawCenterFlex() }));
