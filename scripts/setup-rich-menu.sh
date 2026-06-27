@@ -2,6 +2,8 @@
 set -euo pipefail
 : "${LINE_CHANNEL_ACCESS_TOKEN:?請先設定 LINE_CHANNEL_ACCESS_TOKEN}"
 : "${PUBLIC_BASE_URL:?請先設定 PUBLIC_BASE_URL，例如 https://xxx.zeabur.app}"
+: "${DASHBOARD_URL:=https://noise115.zeabur.app}"
+: "${FIELD_REPORT_URL:=https://out115.zeabur.app}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_JSON="${ROOT}/config/line-rich-menu.generated.json"
 export ROOT TMP_JSON
@@ -11,7 +13,7 @@ import os
 root=Path(os.environ['ROOT'])
 src=(root/'config/line-rich-menu.template.json').read_text(encoding='utf-8')
 base=os.environ['PUBLIC_BASE_URL'].rstrip('/')
-Path(os.environ['TMP_JSON']).write_text(src.replace('${PUBLIC_BASE_URL}', base), encoding='utf-8')
+Path(os.environ['TMP_JSON']).write_text(src.replace('${PUBLIC_BASE_URL}', base).replace('${DASHBOARD_URL}', os.environ.get('DASHBOARD_URL','https://noise115.zeabur.app').rstrip('/')).replace('${FIELD_REPORT_URL}', os.environ.get('FIELD_REPORT_URL','https://out115.zeabur.app').rstrip('/')), encoding='utf-8')
 PY
 RICH_ID=$(curl -sS -X POST https://api.line.me/v2/bot/richmenu \
   -H "Authorization: Bearer ${LINE_CHANNEL_ACCESS_TOKEN}" \

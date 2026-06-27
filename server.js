@@ -14,6 +14,8 @@ const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const STORE_PATH = path.join(DATA_DIR, 'store.json');
 const SEED_PATH = path.join(__dirname, 'data', 'seed-data.json');
 const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
+const DASHBOARD_URL = (process.env.DASHBOARD_URL || 'https://noise115.zeabur.app').replace(/\/$/, '');
+const FIELD_REPORT_URL = (process.env.FIELD_REPORT_URL || 'https://out115.zeabur.app').replace(/\/$/, '');
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Wayne0118';
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(24).toString('hex');
 const ANNUAL_GOAL = Number(process.env.ANNUAL_GOAL || 490);
@@ -33,6 +35,8 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
 
 const sessions = new Map();
+// LINE 原生操作狀態：記錄外勤回報、車號查詢、管理登入等對話流程。
+const lineStates = new Map();
 
 function readStore() {
   const raw = fs.readFileSync(STORE_PATH, 'utf8');
@@ -205,6 +209,8 @@ app.get('/api/meta', (_req, res) => {
     ok: true,
     updatedAt: store.updatedAt,
     baseUrl: PUBLIC_BASE_URL,
+    dashboardUrl: DASHBOARD_URL,
+    fieldReportUrl: FIELD_REPORT_URL,
     settings: { ...store.settings, annualGoal: number(store.settings?.annualGoal, ANNUAL_GOAL) },
     districts: [...new Set(store.records.map(r => r.district).filter(Boolean))].sort(),
     months: [...new Set(store.records.map(r => Number(r.month || monthFromDate(r.date))).filter(Boolean))].sort((a,b)=>a-b),
@@ -348,29 +354,106 @@ function verifyLineSignature(req) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-function getLineMenuFlex() {
-  const links = [
-    ['成果查詢', `${PUBLIC_BASE_URL}/dashboard.html`, '#0068ff'],
-    ['外勤回報', `${PUBLIC_BASE_URL}/field-report.html`, '#00a884'],
-    ['車號追蹤', `${PUBLIC_BASE_URL}/plate.html`, '#ff8a00'],
-    ['KPI報表', `${PUBLIC_BASE_URL}/dashboard.html#kpi`, '#6f4be6'],
-    ['管理後台', `${PUBLIC_BASE_URL}/admin.html`, '#0d4e94'],
-    ['操作說明', `${PUBLIC_BASE_URL}/line-bot.html`, '#54606f']
-  ];
+
+function flexButton(label, text, color = '#0b62d6') {
+  return { type: 'button', style: 'primary', color, height: 'sm', action: { type: 'message', label, text } };
+}
+
+function flexUriButton(label, uri, color = '#0b62d6') {
+  return { type: 'button', style: 'primary', color, height: 'sm', action: { type: 'uri', label, uri } };
+}
+
+function getLineHomeFlex() {
   return {
     type: 'flex',
-    altText: '新北市打擊噪音車管理計畫操作選單',
+    altText: '新北市打擊噪音車管理系統',
     contents: {
       type: 'bubble', size: 'mega',
-      header: { type: 'box', layout: 'vertical', contents: [
-        { type: 'text', text: '新北市打擊噪音車管理計畫', weight: 'bold', size: 'lg', color: '#ffffff' },
-        { type: 'text', text: '成果查詢・外勤回報・KPI管理', size: 'sm', color: '#d9ecff' }
-      ], backgroundColor: '#063a82' },
-      body: { type: 'box', layout: 'vertical', spacing: 'md', contents: links.map(([label, uri, color]) => ({
-        type: 'button', style: 'primary', color, height: 'sm', action: { type: 'uri', label, uri }
-      })) }
+      header: { type: 'box', layout: 'vertical', spacing: 'sm', backgroundColor: '#073b82', contents: [
+        { type: 'text', text: '新北市打擊噪音車管理系統', weight: 'bold', size: 'lg', color: '#ffffff' },
+        { type: 'text', text: 'LINE 主選單｜成果查詢與外勤回報可直接開啟指定平台', size: 'xs', color: '#d9ecff', wrap: true }
+      ]},
+      body: { type: 'box', layout: 'vertical', spacing: 'md', contents: [
+        { type: 'box', layout: 'horizontal', spacing: 'sm', contents: [flexUriButton('📊 成果', DASHBOARD_URL), flexButton('📈 KPI', 'KPI報表', '#2549b8')]},
+        { type: 'box', layout: 'horizontal', spacing: 'sm', contents: [flexUriButton('🚓 回報', FIELD_REPORT_URL, '#009b72'), flexButton('🚗 車號', '車號查詢', '#f58a00')]},
+        { type: 'box', layout: 'horizontal', spacing: 'sm', contents: [flexButton('🏙 行政區', '行政區統計', '#6f4be6'), flexButton('⚙ 管理', '管理功能', '#54606f')]},
+        { type: 'separator', margin: 'md' },
+        { type: 'text', text: '成果查詢連結：noise115；外勤回報連結：out115。KPI、行政區、車號與管理功能維持 LINE 內操作。', size: 'xs', color: '#516070', wrap: true }
+      ]}
     }
   };
+}
+
+function quickReply(items) {
+  return { items: items.slice(0, 13).map(([label, text]) => ({ type: 'action', action: { type: 'message', label, text } })) };
+}
+
+function getResultsMenuText() {
+  return {
+    type: 'flex',
+    altText: '成果查詢選單',
+    contents: {
+      type: 'bubble', size: 'mega',
+      header: { type:'box', layout:'vertical', backgroundColor:'#073b82', contents:[
+        { type:'text', text:'成果查詢選單', color:'#ffffff', weight:'bold', size:'lg' },
+        { type:'text', text:'可直接開啟成果平台，也可在 LINE 內查詢統計。', color:'#d9ecff', size:'xs', wrap:true }
+      ]},
+      body: { type:'box', layout:'vertical', spacing:'sm', contents:[
+        flexUriButton('開啟成果查詢系統', DASHBOARD_URL),
+        flexButton('計畫執行進度', '進度', '#2549b8'),
+        flexButton('月份統計', '月份統計', '#2549b8'),
+        flexButton('行政區統計', '行政區統計', '#6f4be6'),
+        flexButton('時段統計', '時段統計', '#6f4be6'),
+        flexButton('車號追蹤', '車號查詢', '#f58a00')
+      ]}
+    }
+  };
+}
+
+function formatProgressCard(query = {}) {
+  const stats = computeStats(query);
+  const title = [query.month ? `${query.month}月` : '', query.district || '', query.timePeriod || ''].filter(Boolean).join('｜') || '全計畫';
+  return {
+    type: 'flex', altText: `${title}執行成效`,
+    contents: {
+      type: 'bubble', size: 'mega',
+      header: { type:'box', layout:'vertical', backgroundColor:'#073b82', contents:[
+        { type:'text', text:`${title} 執行成效`, weight:'bold', color:'#ffffff', size:'lg' },
+        { type:'text', text:`更新：${(stats.updatedAt || '').slice(0,10) || '即時資料'}`, color:'#d9ecff', size:'xs' }
+      ]},
+      body: { type:'box', layout:'vertical', spacing:'sm', contents:[
+        { type:'text', text:`年度進度：${stats.completed}/${stats.goal}場（${(stats.progressRate*100).toFixed(1)}%）`, weight:'bold', size:'md', color:'#092b5f' },
+        { type:'separator', margin:'sm' },
+        ...[
+          ['執行場次', `${stats.total.sessions}場`], ['車流辨識', `${stats.total.detectCount.toLocaleString()}件`],
+          ['超標件數', `${stats.total.exceedCount.toLocaleString()}件`], ['告發件數', `${stats.total.citationCount.toLocaleString()}件`],
+          ['通知到檢', `${stats.total.inspectionCount.toLocaleString()}件`], ['告發率', `${(stats.total.citationRate*100).toFixed(1)}%`],
+          ['通檢率', `${(stats.total.inspectionRate*100).toFixed(1)}%`], ['KPI成效', stats.total.kpi.toFixed(2)]
+        ].map(([k,v]) => ({ type:'box', layout:'horizontal', contents:[
+          { type:'text', text:k, color:'#516070', size:'sm', flex:3 }, { type:'text', text:v, color:'#0b2f6b', size:'sm', weight:'bold', align:'end', flex:4 }
+        ]}))
+      ]},
+      footer: { type:'box', layout:'vertical', spacing:'sm', contents:[
+        flexButton('查詢月份', '月份統計'), flexButton('查詢行政區', '行政區統計', '#6f4be6')
+      ]}
+    }
+  };
+}
+
+function formatRankingText(type = 'district') {
+  const stats = computeStats({});
+  const list = type === 'month' ? stats.monthly : type === 'time' ? stats.timePeriods : stats.districts;
+  const title = type === 'month' ? '月份統計排行' : type === 'time' ? '時段統計排行' : '行政區統計排行';
+  const lines = list.slice(0, 8).map((x, i) => `${i+1}. ${x.name}｜${x.sessions}場｜告發${x.citationCount}｜通檢${x.inspectionCount}｜KPI ${x.kpi.toFixed(2)}`);
+  return `${title}\n${lines.join('\n') || '目前無資料'}`;
+}
+
+function formatPlateText(plate) {
+  const p = norm(plate).toUpperCase();
+  const stats = computeStats({ plate: p });
+  const profile = stats.plates.find(x => x.plateNo === p) || stats.plates[0];
+  if (!profile) return `查無車號 ${p} 的紀錄。可輸入完整車牌，例如 ABC-1234。`;
+  return `【車號追蹤】\n車號：${profile.plateNo}\n累犯判定：${profile.repeatOffender ? '是' : '否'}\n紀錄筆數：${profile.records}筆\n最高量測：${profile.maxDbMeasured.toFixed(1)} dB\n最高超標：${profile.maxDbOver.toFixed(1)} dB\n告發件數：${profile.citationCount}\n通知到檢：${profile.inspectionCount}\n出現行政區：${profile.districts || '未分類'}\n最近日期：${profile.lastDate || '-'}`;
 }
 
 function parseLineCommand(text = '') {
@@ -379,20 +462,103 @@ function parseLineCommand(text = '') {
   const districtMatch = t.match(/([\u4e00-\u9fa5]{2,3}區)/);
   const plateMatch = t.match(/(?:車牌|車號|plate)\s*[:：]?\s*([A-Z0-9-]{3,12})/i) || t.match(/\b([A-Z]{2,4}-?\d{3,4})\b/i);
   return {
-    wantsMenu: /選單|menu|平台|功能/.test(t),
+    wantsMenu: /選單|menu|平台|功能|首頁|主選單/.test(t),
+    wantsResultsMenu: /成果查詢/.test(t),
+    wantsFieldStart: /開始回報|外勤回報|回報場次/.test(t),
+    wantsFieldLine: /LINE填報|簡易填報|對話回報/.test(t),
+    wantsAdmin: /管理功能|管理登入|後台管理/.test(t),
     wantsProgress: /進度|達成|剩餘/.test(t),
-    wantsStats: /成效|統計|KPI|告發|通檢|執行/.test(t) || Boolean(monthMatch || districtMatch),
+    wantsKpi: /KPI|kpi|告發率|通檢率/.test(t),
+    wantsMonthMenu: /月份統計|月分統計|月份查詢/.test(t),
+    wantsDistrictMenu: /行政區統計|行政區查詢/.test(t),
+    wantsTimeMenu: /時段統計|時段查詢/.test(t),
+    wantsPlateStart: /車號查詢|車牌查詢|車號追蹤|車牌追蹤/.test(t),
+    wantsStats: /成效|統計|告發|通檢|執行/.test(t) || Boolean(monthMatch || districtMatch),
     month: monthMatch ? Number(monthMatch[1]) : undefined,
     district: districtMatch ? districtMatch[1] : undefined,
     plate: plateMatch ? plateMatch[1].toUpperCase().replace(/([A-Z]+)(\d+)/, '$1-$2') : undefined
   };
 }
 
+const fieldSteps = [
+  ['date', '請輸入日期（例：115/06/27）'],
+  ['sessionNo', '請輸入場次編號（例：S201）'],
+  ['machineNo', '請輸入機台編號（例：OE_ZB004）'],
+  ['calibrationValue', '請輸入校正值（例：93.9）'],
+  ['district', '請輸入行政區（例：淡水區）'],
+  ['location', '請輸入執勤地點'],
+  ['latlng', '請輸入座標（例：25.1865425,121.4332440），不知道可輸入「略過」'],
+  ['notes', '請輸入備註，沒有請輸入「無」']
+];
+
+function getFieldReportMenu() {
+  return { type:'flex', altText:'外勤回報', contents:{ type:'bubble', size:'mega', header:{type:'box', layout:'vertical', backgroundColor:'#009b72', contents:[{type:'text', text:'外勤回報', color:'#ffffff', weight:'bold', size:'lg'}]}, body:{type:'box', layout:'vertical', spacing:'md', contents:[{type:'text', text:'建議使用外勤回報平台填寫完整照片與座標資料；也可使用 LINE 簡易填報。', size:'sm', color:'#516070', wrap:true}, {type:'text', text:`外勤平台：${FIELD_REPORT_URL}`, size:'xs', color:'#7b8794', wrap:true}]}, footer:{type:'box', layout:'vertical', spacing:'sm', contents:[flexUriButton('開啟外勤回報平台', FIELD_REPORT_URL, '#009b72'), flexButton('LINE簡易填報', 'LINE填報', '#2549b8')]}} };
+}
+
+function startFieldReport(userId) {
+  lineStates.set(userId, { mode: 'field', step: 0, data: {} });
+  return { type:'text', text:`開始 LINE 簡易外勤回報。
+${fieldSteps[0][1]}
+
+如需上傳照片或完整座標，請輸入「外勤回報」開啟正式平台。` };
+}
+
+function handleFieldReport(userId, text) {
+  const state = lineStates.get(userId);
+  const [key] = fieldSteps[state.step];
+  if (!['取消', '中止'].includes(text.trim())) {
+    if (key === 'latlng' && text !== '略過') {
+      const [lat, lng] = text.split(/[,，]/).map(v => number(v, 0));
+      state.data.lat = lat; state.data.lng = lng;
+    } else if (text !== '略過') {
+      state.data[key] = text.trim();
+    }
+  } else {
+    lineStates.delete(userId);
+    return { type:'text', text:'已取消外勤回報。' };
+  }
+  state.step += 1;
+  if (state.step < fieldSteps.length) {
+    lineStates.set(userId, state);
+    return { type:'text', text: fieldSteps[state.step][1] };
+  }
+  state.mode = 'field_confirm';
+  lineStates.set(userId, state);
+  const d = state.data;
+  return { type:'text', text:`請確認本次回報：\n日期：${d.date || '-'}\n場次：${d.sessionNo || '-'}\n機台：${d.machineNo || '-'}\n校正值：${d.calibrationValue || '-'}\n行政區：${d.district || '-'}\n地點：${d.location || '-'}\n座標：${d.lat || '-'},${d.lng || '-'}\n備註：${d.notes || '-'}\n\n請回覆「確認送出」或「取消」。`, quickReply: quickReply([['確認送出','確認送出'], ['取消','取消']]) };
+}
+
+function confirmFieldReport(userId, text) {
+  const state = lineStates.get(userId);
+  if (!/確認送出|送出|確認/.test(text)) {
+    lineStates.delete(userId);
+    return { type:'text', text:'已取消外勤回報。' };
+  }
+  const store = readStore();
+  const d = state.data;
+  const report = {
+    id: `LINE${Date.now()}`, createdAt: new Date().toISOString(), date: d.date || new Date().toISOString().slice(0,10),
+    district: d.district || '', location: d.location || '', sessionNo: d.sessionNo || '', machineNo: d.machineNo || '',
+    reportType: 'LINE外勤回報', speedLimit: 50, noiseStandard: 86, calibrationValue: number(d.calibrationValue, 0),
+    lat: number(d.lat,0), lng: number(d.lng,0), staff: userId, notes: d.notes || ''
+  };
+  store.fieldReports.push(report);
+  writeStore(store);
+  lineStates.delete(userId);
+  return { type:'text', text:`已完成外勤回報。\n回報編號：${report.id}\n場次：${report.sessionNo}\n行政區：${report.district}` };
+}
+
+function adminMenuText() {
+  return { type:'text', text:'管理功能請選擇：', quickReply: quickReply([
+    ['管理登入','管理登入'], ['匯出Excel','匯出Excel'], ['今日回報','今日回報'], ['平台後台','平台後台']
+  ]) };
+}
+
 function formatStatsForLine(query) {
   const stats = computeStats(query);
   const label = [query.month ? `${query.month}月` : '', query.district || '', query.plate ? `車號 ${query.plate}` : ''].filter(Boolean).join('｜') || '全計畫';
   const plateLine = query.plate && stats.plates[0] ? `\n車號追蹤：${stats.plates[0].plateNo}\n累犯判定：${stats.plates[0].repeatOffender ? '是' : '否'}｜最高超標：${stats.plates[0].maxDbOver.toFixed(1)} dB` : '';
-  return `【${label} 執行成效】\n已完成：${stats.completed}/${stats.goal}場（${(stats.progressRate*100).toFixed(1)}%）\n查詢筆數：${stats.recent.length}筆\n執行場次：${stats.total.sessions}場\n車流辨識：${stats.total.detectCount.toLocaleString()}件\n超標件數：${stats.total.exceedCount.toLocaleString()}件\n告發件數：${stats.total.citationCount.toLocaleString()}件\n通知到檢：${stats.total.inspectionCount.toLocaleString()}件\n告發率：${(stats.total.citationRate*100).toFixed(1)}%\n通檢率：${(stats.total.inspectionRate*100).toFixed(1)}%\nKPI成效：${stats.total.kpi.toFixed(2)}${plateLine}\n\n開啟平台：${PUBLIC_BASE_URL}/dashboard.html`;
+  return `【${label} 執行成效】\n已完成：${stats.completed}/${stats.goal}場（${(stats.progressRate*100).toFixed(1)}%）\n查詢筆數：${stats.recent.length}筆\n執行場次：${stats.total.sessions}場\n車流辨識：${stats.total.detectCount.toLocaleString()}件\n超標件數：${stats.total.exceedCount.toLocaleString()}件\n告發件數：${stats.total.citationCount.toLocaleString()}件\n通知到檢：${stats.total.inspectionCount.toLocaleString()}件\n告發率：${(stats.total.citationRate*100).toFixed(1)}%\n通檢率：${(stats.total.inspectionRate*100).toFixed(1)}%\nKPI成效：${stats.total.kpi.toFixed(2)}${plateLine}`;
 }
 
 async function replyLine(replyToken, messages) {
@@ -404,18 +570,48 @@ async function replyLine(replyToken, messages) {
   });
 }
 
+app.get('/api/line/webhook', (_req, res) => res.status(405).send('LINE webhook endpoint is ready. Use POST from LINE Messaging API.'));
+
 app.post('/api/line/webhook', async (req, res) => {
   if (!verifyLineSignature(req)) return res.status(401).json({ ok: false, message: 'LINE signature invalid' });
   const events = req.body?.events || [];
   res.json({ ok: true });
   for (const event of events) {
     if (event.type !== 'message' || event.message?.type !== 'text') continue;
-    const cmd = parseLineCommand(event.message.text || '');
+    const userId = event.source?.userId || 'unknown';
+    const text = event.message.text || '';
+    const state = lineStates.get(userId);
     try {
-      if (cmd.wantsMenu) await replyLine(event.replyToken, getLineMenuFlex());
-      else if (cmd.plate) await replyLine(event.replyToken, { type: 'text', text: formatStatsForLine({ plate: cmd.plate }) });
-      else if (cmd.wantsStats || cmd.wantsProgress) await replyLine(event.replyToken, { type: 'text', text: formatStatsForLine({ month: cmd.month, district: cmd.district }) });
-      else await replyLine(event.replyToken, { type: 'text', text: '可輸入：選單、進度、2月份執行成效、淡水區執行成效、車牌 ABC-1234。' });
+      if (state?.mode === 'field') { await replyLine(event.replyToken, handleFieldReport(userId, text)); continue; }
+      if (state?.mode === 'field_confirm') { await replyLine(event.replyToken, confirmFieldReport(userId, text)); continue; }
+      if (state?.mode === 'plate_wait') { lineStates.delete(userId); await replyLine(event.replyToken, { type:'text', text: formatPlateText(text) }); continue; }
+      if (state?.mode === 'admin_wait') {
+        lineStates.delete(userId);
+        await replyLine(event.replyToken, norm(text) === ADMIN_PASSWORD ? adminMenuText() : { type:'text', text:'密碼錯誤，請重新輸入「管理登入」。' });
+        continue;
+      }
+
+      const cmd = parseLineCommand(text);
+      if (cmd.wantsMenu) await replyLine(event.replyToken, getLineHomeFlex());
+      else if (cmd.wantsResultsMenu) await replyLine(event.replyToken, getResultsMenuText());
+      else if (cmd.wantsFieldLine) await replyLine(event.replyToken, startFieldReport(userId));
+      else if (cmd.wantsFieldStart) await replyLine(event.replyToken, getFieldReportMenu());
+      else if (cmd.wantsAdmin) { lineStates.set(userId, { mode:'admin_wait' }); await replyLine(event.replyToken, { type:'text', text:'請輸入管理密碼。' }); }
+      else if (/匯出Excel/.test(text)) await replyLine(event.replyToken, { type:'text', text:`Excel匯出需管理登入後下載：${PUBLIC_BASE_URL}/admin.html` });
+      else if (/開啟成果系統|成果系統連結|成果平台/.test(text)) await replyLine(event.replyToken, { type:'flex', altText:'開啟成果查詢系統', contents:{ type:'bubble', body:{ type:'box', layout:'vertical', spacing:'md', contents:[{type:'text', text:'成果查詢系統', weight:'bold', size:'lg', color:'#092b5f'}, {type:'text', text:'點選下方按鈕開啟成果查詢平台。', size:'sm', color:'#516070'}]}, footer:{ type:'box', layout:'vertical', contents:[flexUriButton('開啟成果查詢', DASHBOARD_URL)] } } });
+      else if (/開啟外勤回報|外勤回報連結|外勤平台/.test(text)) await replyLine(event.replyToken, { type:'flex', altText:'開啟外勤回報平台', contents:{ type:'bubble', body:{ type:'box', layout:'vertical', spacing:'md', contents:[{type:'text', text:'外勤回報平台', weight:'bold', size:'lg', color:'#092b5f'}, {type:'text', text:'點選下方按鈕開啟外勤回報表單。', size:'sm', color:'#516070'}]}, footer:{ type:'box', layout:'vertical', contents:[flexUriButton('開啟外勤回報', FIELD_REPORT_URL, '#009b72')] } } });
+      else if (/平台後台/.test(text)) await replyLine(event.replyToken, { type:'text', text:`管理後台：${PUBLIC_BASE_URL}/admin.html` });
+      else if (cmd.wantsMonthMenu) await replyLine(event.replyToken, { type:'text', text:'請選擇月份：', quickReply: quickReply(Array.from({length:12},(_,i)=>[`${i+1}月`, `${i+1}月份執行成效`])) });
+      else if (cmd.wantsDistrictMenu) {
+        const districts = computeStats({}).districts.map(d=>d.name).slice(0,12);
+        await replyLine(event.replyToken, { type:'text', text:'請選擇行政區：', quickReply: quickReply(districts.map(d=>[d, `${d}執行成效`])) });
+      }
+      else if (cmd.wantsTimeMenu) await replyLine(event.replyToken, { type:'text', text: formatRankingText('time') });
+      else if (cmd.wantsPlateStart) { lineStates.set(userId, { mode:'plate_wait' }); await replyLine(event.replyToken, { type:'text', text:'請輸入車牌號碼，例如 ABC-1234。' }); }
+      else if (cmd.plate) await replyLine(event.replyToken, { type: 'text', text: formatPlateText(cmd.plate) });
+      else if (cmd.wantsKpi || cmd.wantsProgress) await replyLine(event.replyToken, formatProgressCard({ month: cmd.month, district: cmd.district }));
+      else if (cmd.wantsStats) await replyLine(event.replyToken, { type: 'text', text: formatStatsForLine({ month: cmd.month, district: cmd.district }) });
+      else await replyLine(event.replyToken, { type: 'text', text: '請點下方「管理選單」，或輸入：成果查詢、開始回報、KPI報表、車號查詢、2月份執行成效、淡水區執行成效。' });
     } catch (error) {
       console.error('LINE reply failed', error);
     }
@@ -426,16 +622,23 @@ app.get('/api/line/rich-menu-spec', (_req, res) => {
   res.json({ ok: true, image: `${PUBLIC_BASE_URL}/assets/line-rich-menu.jpg`, spec: buildRichMenuSpec(PUBLIC_BASE_URL) });
 });
 
-function buildRichMenuSpec(base) {
+function buildRichMenuSpec(_base) {
   const W = 2500, H = 1686, header = 280, margin = 70, gap = 34;
   const tw = Math.floor((W - 2*margin - 2*gap) / 3);
   const th = Math.floor((H - header - 2*margin - gap) / 2);
-  const urls = ['/dashboard.html','/field-report.html','/plate.html','/dashboard.html#kpi','/admin.html','/line-bot.html'];
-  const areas = urls.map((u,i)=>{
+  const actions = [
+    { type:'uri', uri:DASHBOARD_URL },
+    { type:'uri', uri:FIELD_REPORT_URL },
+    { type:'message', text:'車號查詢' },
+    { type:'message', text:'KPI報表' },
+    { type:'message', text:'行政區統計' },
+    { type:'message', text:'管理功能' }
+  ];
+  const areas = actions.map((action,i)=>{
     const c=i%3, r=Math.floor(i/3);
-    return { bounds:{ x: margin + c*(tw+gap), y: header + margin + r*(th+gap), width: tw, height: th }, action:{ type:'uri', uri: `${base}${u}` } };
+    return { bounds:{ x: margin + c*(tw+gap), y: header + margin + r*(th+gap), width: tw, height: th }, action };
   });
-  return { size: { width: W, height: H }, selected: true, name: '新北噪音車管理選單', chatBarText: '管理選單', areas };
+  return { size: { width: W, height: H }, selected: true, name: '新北噪音車V4圖文選單', chatBarText: '管理選單', areas };
 }
 
 app.use((err, _req, res, _next) => {

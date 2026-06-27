@@ -1,8 +1,8 @@
 {
   "name": "newtaipei-noise-control-system",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
-  "description": "新北市打擊噪音車管理計畫：LINE BOT 跳轉、成果查詢、外勤回報、KPI 與後端管理。",
+  "description": "新北市打擊噪音車管理計畫：LINE 原生操作版 V4，成果查詢與外勤回報指定跳轉，KPI/車號/行政區於 LINE 內操作。",
   "type": "module",
   "scripts": {
     "start": "node server.js",

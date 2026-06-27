@@ -1,14 +1,14 @@
 {
   "size": { "width": 2500, "height": 1686 },
   "selected": true,
-  "name": "新北噪音車管理選單",
+  "name": "新北噪音車V4圖文選單",
   "chatBarText": "管理選單",
   "areas": [
-    { "bounds": { "x": 70, "y": 350, "width": 787, "height": 598 }, "action": { "type": "uri", "uri": "${PUBLIC_BASE_URL}/dashboard.html" } },
-    { "bounds": { "x": 891, "y": 350, "width": 787, "height": 598 }, "action": { "type": "uri", "uri": "${PUBLIC_BASE_URL}/field-report.html" } },
-    { "bounds": { "x": 1712, "y": 350, "width": 787, "height": 598 }, "action": { "type": "uri", "uri": "${PUBLIC_BASE_URL}/plate.html" } },
-    { "bounds": { "x": 70, "y": 982, "width": 787, "height": 598 }, "action": { "type": "uri", "uri": "${PUBLIC_BASE_URL}/dashboard.html#kpi" } },
-    { "bounds": { "x": 891, "y": 982, "width": 787, "height": 598 }, "action": { "type": "uri", "uri": "${PUBLIC_BASE_URL}/admin.html" } },
-    { "bounds": { "x": 1712, "y": 982, "width": 787, "height": 598 }, "action": { "type": "uri", "uri": "${PUBLIC_BASE_URL}/line-bot.html" } }
+    { "bounds": { "x": 70, "y": 350, "width": 764, "height": 616 }, "action": { "type": "uri", "uri": "${DASHBOARD_URL}" } },
+    { "bounds": { "x": 868, "y": 350, "width": 764, "height": 616 }, "action": { "type": "uri", "uri": "${FIELD_REPORT_URL}" } },
+    { "bounds": { "x": 1666, "y": 350, "width": 764, "height": 616 }, "action": { "type": "message", "text": "車號查詢" } },
+    { "bounds": { "x": 70, "y": 1000, "width": 764, "height": 616 }, "action": { "type": "message", "text": "KPI報表" } },
+    { "bounds": { "x": 868, "y": 1000, "width": 764, "height": 616 }, "action": { "type": "message", "text": "行政區統計" } },
+    { "bounds": { "x": 1666, "y": 1000, "width": 764, "height": 616 }, "action": { "type": "message", "text": "管理功能" } }
   ]
 }
