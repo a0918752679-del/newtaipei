@@ -1,14 +1,83 @@
 {
-  "size": { "width": 2500, "height": 1686 },
+  "size": {
+    "width": 2500,
+    "height": 1686
+  },
   "selected": true,
-  "name": "新北噪音車V4圖文選單",
+  "name": "新北噪音車V6清晰圖文選單",
   "chatBarText": "管理選單",
   "areas": [
-    { "bounds": { "x": 70, "y": 350, "width": 764, "height": 616 }, "action": { "type": "uri", "uri": "${DASHBOARD_URL}" } },
-    { "bounds": { "x": 868, "y": 350, "width": 764, "height": 616 }, "action": { "type": "uri", "uri": "${FIELD_REPORT_URL}" } },
-    { "bounds": { "x": 1666, "y": 350, "width": 764, "height": 616 }, "action": { "type": "message", "text": "車號查詢" } },
-    { "bounds": { "x": 70, "y": 1000, "width": 764, "height": 616 }, "action": { "type": "message", "text": "KPI報表" } },
-    { "bounds": { "x": 868, "y": 1000, "width": 764, "height": 616 }, "action": { "type": "message", "text": "行政區統計" } },
-    { "bounds": { "x": 1666, "y": 1000, "width": 764, "height": 616 }, "action": { "type": "message", "text": "管理功能" } }
+    {
+      "bounds": {
+        "x": 70,
+        "y": 350,
+        "width": 764,
+        "height": 616
+      },
+      "action": {
+        "type": "uri",
+        "uri": "${DASHBOARD_URL}"
+      }
+    },
+    {
+      "bounds": {
+        "x": 868,
+        "y": 350,
+        "width": 764,
+        "height": 616
+      },
+      "action": {
+        "type": "uri",
+        "uri": "${FIELD_REPORT_URL}"
+      }
+    },
+    {
+      "bounds": {
+        "x": 1666,
+        "y": 350,
+        "width": 764,
+        "height": 616
+      },
+      "action": {
+        "type": "message",
+        "text": "車號查詢"
+      }
+    },
+    {
+      "bounds": {
+        "x": 70,
+        "y": 1000,
+        "width": 764,
+        "height": 616
+      },
+      "action": {
+        "type": "message",
+        "text": "KPI報表"
+      }
+    },
+    {
+      "bounds": {
+        "x": 868,
+        "y": 1000,
+        "width": 764,
+        "height": 616
+      },
+      "action": {
+        "type": "message",
+        "text": "行政區統計"
+      }
+    },
+    {
+      "bounds": {
+        "x": 1666,
+        "y": 1000,
+        "width": 764,
+        "height": 616
+      },
+      "action": {
+        "type": "message",
+        "text": "管理功能"
+      }
+    }
   ]
 }
