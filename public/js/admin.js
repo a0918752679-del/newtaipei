@@ -16,5 +16,26 @@ window.addEventListener('DOMContentLoaded',()=>{
   $('#settingsForm').addEventListener('submit',async e=>{e.preventDefault(); await api('/api/admin/settings',{method:'POST',body:JSON.stringify({annualGoal:$('#settingsGoal').value})}); await checkLoad(); alert('已更新年度目標');});
   $('#importForm').addEventListener('submit',async e=>{e.preventDefault(); const fd=new FormData(e.target); const res=await fetch('/api/admin/import',{method:'POST',body:fd}); const data=await res.json(); if(!res.ok) return alert(data.message||'匯入失敗'); alert(`匯入完成：${data.count}筆`); await checkLoad();});
   $('#reset').addEventListener('click',async()=>{if(confirm('確認還原範例資料？現有資料會被覆蓋。')){await api('/api/admin/reset',{method:'DELETE'}); await checkLoad();}});
+
+  $('#setupRichMenu').addEventListener('click', async()=>{
+    if(!confirm('確認建立並設為 LINE 官方帳號的預設圖文選單？')) return;
+    $('#richMenuResult').textContent='正在呼叫 LINE API 建立 Rich Menu...';
+    try{
+      const data=await api('/api/admin/line/rich-menu/setup',{method:'POST',body:'{}'});
+      $('#richMenuResult').innerHTML=`✅ ${data.message}<br>Rich Menu ID：${data.richMenuId}<br>成果查詢：${data.spec.areas[0].action.uri}<br>外勤回報：${data.spec.areas[1].action.uri}`;
+    }catch(err){
+      $('#richMenuResult').textContent='❌ 建立失敗：'+err.message;
+    }
+  });
+  $('#richMenuStatus').addEventListener('click', async()=>{
+    $('#richMenuResult').textContent='正在檢查 LINE Rich Menu 狀態...';
+    try{
+      const data=await api('/api/admin/line/rich-menu/status');
+      $('#richMenuResult').innerHTML=`Token：${data.hasToken?'已設定':'未設定'}<br>預設 Rich Menu：${data.defaultRichMenuId || '尚未設定'}<br>既有 Rich Menu 數量：${data.richMenus.length}<br>成果查詢：${data.dashboardUrl}<br>外勤回報：${data.fieldReportUrl}`;
+    }catch(err){
+      $('#richMenuResult').textContent='❌ 查詢失敗：'+err.message;
+    }
+  });
+
   $('#downloadRichSpec').addEventListener('click',async()=>{const data=await api('/api/line/rich-menu-spec'); const blob=new Blob([JSON.stringify(data.spec,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='line-rich-menu.json'; a.click();});
 });

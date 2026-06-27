@@ -344,6 +344,75 @@ app.get('/api/admin/export.xlsx', requireAdmin, (_req, res) => {
   res.send(out);
 });
 
+async function lineApi(pathname, options = {}) {
+  if (!LINE_TOKEN) throw new Error('LINE_CHANNEL_ACCESS_TOKEN 未設定，無法呼叫 LINE API');
+  const res = await fetch(`https://api.line.me${pathname}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${LINE_TOKEN}`,
+      ...(options.headers || {})
+    }
+  });
+  const text = await res.text();
+  let data = {};
+  try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+  if (!res.ok) {
+    const message = data.message || data.raw || `LINE API error ${res.status}`;
+    throw new Error(message);
+  }
+  return data;
+}
+
+async function createAndSetDefaultRichMenu() {
+  const spec = buildRichMenuSpec(PUBLIC_BASE_URL);
+  spec.name = '新北噪音車V5圖文選單';
+
+  // 先建立新的 Rich Menu
+  const created = await lineApi('/v2/bot/richmenu', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(spec)
+  });
+  const richMenuId = created.richMenuId;
+
+  // 上傳圖文選單圖片
+  const imagePath = path.join(__dirname, 'public', 'assets', 'line-rich-menu.jpg');
+  if (!fs.existsSync(imagePath)) throw new Error('找不到 public/assets/line-rich-menu.jpg');
+  const image = fs.readFileSync(imagePath);
+  await fetch(`https://api-data.line.me/v2/bot/richmenu/${richMenuId}/content`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${LINE_TOKEN}`, 'Content-Type': 'image/jpeg' },
+    body: image
+  }).then(async res => {
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(t || `Rich Menu 圖片上傳失敗：${res.status}`);
+    }
+  });
+
+  // 設為全體好友預設 Rich Menu
+  await lineApi(`/v2/bot/user/all/richmenu/${richMenuId}`, { method: 'POST' });
+  return { richMenuId, spec, image: `${PUBLIC_BASE_URL}/assets/line-rich-menu.jpg` };
+}
+
+async function getRichMenuStatus() {
+  const result = { hasToken: Boolean(LINE_TOKEN), defaultRichMenuId: null, richMenus: [] };
+  if (!LINE_TOKEN) return result;
+  try {
+    const def = await lineApi('/v2/bot/user/all/richmenu');
+    result.defaultRichMenuId = def.richMenuId || null;
+  } catch (e) {
+    result.defaultRichMenuId = null;
+  }
+  try {
+    const list = await lineApi('/v2/bot/richmenu/list');
+    result.richMenus = list.richmenus || [];
+  } catch (e) {
+    result.richMenus = [];
+  }
+  return result;
+}
+
 function verifyLineSignature(req) {
   if (!LINE_SECRET) return true;
   const signature = req.headers['x-line-signature'];
@@ -618,6 +687,34 @@ app.post('/api/line/webhook', async (req, res) => {
   }
 });
 
+
+app.get('/api/admin/line/rich-menu/status', requireAdmin, async (_req, res) => {
+  try {
+    res.json({ ok: true, ...(await getRichMenuStatus()), dashboardUrl: DASHBOARD_URL, fieldReportUrl: FIELD_REPORT_URL, publicBaseUrl: PUBLIC_BASE_URL });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: error.message });
+  }
+});
+
+app.post('/api/admin/line/rich-menu/setup', requireAdmin, async (_req, res) => {
+  try {
+    const result = await createAndSetDefaultRichMenu();
+    res.json({ ok: true, message: 'LINE Rich Menu 已建立並設為預設選單', ...result });
+  } catch (error) {
+    console.error('Rich Menu setup failed', error);
+    res.status(500).json({ ok: false, message: error.message });
+  }
+});
+
+app.delete('/api/admin/line/rich-menu/default', requireAdmin, async (_req, res) => {
+  try {
+    await lineApi('/v2/bot/user/all/richmenu', { method: 'DELETE' });
+    res.json({ ok: true, message: '已取消預設 Rich Menu' });
+  } catch (error) {
+    res.status(500).json({ ok: false, message: error.message });
+  }
+});
+
 app.get('/api/line/rich-menu-spec', (_req, res) => {
   res.json({ ok: true, image: `${PUBLIC_BASE_URL}/assets/line-rich-menu.jpg`, spec: buildRichMenuSpec(PUBLIC_BASE_URL) });
 });
@@ -638,7 +735,7 @@ function buildRichMenuSpec(_base) {
     const c=i%3, r=Math.floor(i/3);
     return { bounds:{ x: margin + c*(tw+gap), y: header + margin + r*(th+gap), width: tw, height: th }, action };
   });
-  return { size: { width: W, height: H }, selected: true, name: '新北噪音車V4圖文選單', chatBarText: '管理選單', areas };
+  return { size: { width: W, height: H }, selected: true, name: '新北噪音車V5圖文選單', chatBarText: '管理選單', areas };
 }
 
 app.use((err, _req, res, _next) => {
