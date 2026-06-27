@@ -204,7 +204,7 @@ function normalizeImportedRow(row, index) {
   };
 }
 
-app.get('/healthz', (_req, res) => res.json({ ok: true, service: 'newtaipei-noise-control-system-v11-enterprise' }));
+app.get('/healthz', (_req, res) => res.json({ ok: true, service: 'newtaipei-noise-control-system-v12-ultimate' }));
 app.get('/api/meta', (_req, res) => {
   const store = readStore();
   res.json({
@@ -494,7 +494,7 @@ async function lineApi(pathname, options = {}) {
 
 async function createAndSetDefaultRichMenu() {
   const spec = buildRichMenuSpec(PUBLIC_BASE_URL);
-  spec.name = '新北噪音車V10企業版圖文選單';
+  spec.name = '新北噪音車V12 Ultimate企業版圖文選單';
 
   // 先建立新的 Rich Menu
   const created = await lineApi('/v2/bot/richmenu', {
@@ -829,17 +829,17 @@ const lawArticles = {
 function lawButton(label, text, color = '#0b62d6') { return flexButton(label, text, color); }
 function getLawCenterFlex() {
   return { type:'flex', altText:'法規中心與噪音車新聞', contents:{ type:'carousel', contents:[
-    { type:'bubble', size:'mega', header:{type:'box', layout:'vertical', backgroundColor:'#c2272d', paddingAll:'18px', contents:[{type:'text', text:'🚨 最新修法', color:'#fff', weight:'bold', size:'lg'}, {type:'text', text:'噪音管制法車輛噪音罰則強化', color:'#ffe5e5', size:'sm'}]}, body:{type:'box', layout:'vertical', spacing:'md', contents:[
+    { type:'bubble', size:'mega', header:{type:'box', layout:'vertical', backgroundColor:'#c2272d', paddingAll:'18px', contents:[{type:'text', text:'🚨 最新修法', color:'#ffffff', weight:'bold', size:'lg'}, {type:'text', text:'噪音管制法車輛噪音罰則強化', color:'#ffe5e5', size:'sm'}]}, body:{type:'box', layout:'vertical', spacing:'md', contents:[
       {type:'text', text:'✔ 最高罰鍰提高至 3萬6千元\n✔ 情節重大可吊扣牌照\n✔ 一年內再犯可吊扣牌照六個月', wrap:true, size:'md', color:'#092b5f'},
       {type:'text', text:'輸入「修法」可看修法重點與舊法/新法差異。', size:'xs', color:'#6b7788', wrap:true}
     ]}, footer:{type:'box', layout:'vertical', spacing:'sm', contents:[lawButton('查看修法重點','修法','#c2272d'), flexUriButton('環境部公告', lawSources.moenvRevision, '#54606f')] }},
-    { type:'bubble', size:'mega', header:{type:'box', layout:'vertical', backgroundColor:'#073b82', paddingAll:'18px', contents:[{type:'text', text:'📖 常用法條', color:'#fff', weight:'bold', size:'lg'}, {type:'text', text:'新北噪音車執法常查條文', color:'#d9ecff', size:'sm'}]}, body:{type:'box', layout:'vertical', spacing:'sm', contents:[
+    { type:'bubble', size:'mega', header:{type:'box', layout:'vertical', backgroundColor:'#073b82', paddingAll:'18px', contents:[{type:'text', text:'📖 常用法條', color:'#ffffff', weight:'bold', size:'lg'}, {type:'text', text:'新北噪音車執法常查條文', color:'#d9ecff', size:'sm'}]}, body:{type:'box', layout:'vertical', spacing:'sm', contents:[
       iconText('11','第11條','車輛噪音標準'), iconText('13','第13條','通知到檢'), iconText('26','第26條','裁罰規定'), iconText('28','第28條','未依通知檢驗')
     ]}, footer:{type:'box', layout:'vertical', spacing:'sm', contents:[lawButton('查第26條','法條26','#073b82'), lawButton('查第28條','法條28','#073b82')] }},
-    { type:'bubble', size:'mega', header:{type:'box', layout:'vertical', backgroundColor:'#6f4be6', paddingAll:'18px', contents:[{type:'text', text:'🧭 修法重點', color:'#fff', weight:'bold', size:'lg'}, {type:'text', text:'快速掌握政策風險與執法重點', color:'#efe8ff', size:'sm'}]}, body:{type:'box', layout:'vertical', spacing:'md', contents:[
+    { type:'bubble', size:'mega', header:{type:'box', layout:'vertical', backgroundColor:'#6f4be6', paddingAll:'18px', contents:[{type:'text', text:'🧭 修法重點', color:'#ffffff', weight:'bold', size:'lg'}, {type:'text', text:'快速掌握政策風險與執法重點', color:'#efe8ff', size:'sm'}]}, body:{type:'box', layout:'vertical', spacing:'md', contents:[
       {type:'text', text:'輸入「修法」即可查看：\n✓ 修法原因\n✓ 修法日期\n✓ 修法重點\n✓ 舊法 vs 新法', wrap:true, size:'md', color:'#092b5f'}
     ]}, footer:{type:'box', layout:'vertical', contents:[lawButton('查看修法', '修法', '#6f4be6')]}},
-    { type:'bubble', size:'mega', header:{type:'box', layout:'vertical', backgroundColor:'#009b72', paddingAll:'18px', contents:[{type:'text', text:'📰 噪音車新聞', color:'#fff', weight:'bold', size:'lg'}, {type:'text', text:'環境部、噪音車專區、中央社', color:'#dbfff5', size:'sm'}]}, body:{type:'box', layout:'vertical', spacing:'sm', contents:[
+    { type:'bubble', size:'mega', header:{type:'box', layout:'vertical', backgroundColor:'#009b72', paddingAll:'18px', contents:[{type:'text', text:'📰 噪音車新聞', color:'#ffffff', weight:'bold', size:'lg'}, {type:'text', text:'環境部、噪音車專區、中央社', color:'#dbfff5', size:'sm'}]}, body:{type:'box', layout:'vertical', spacing:'sm', contents:[
       iconText('新','新北/地方治理','科技執法與陳情趨勢'), iconText('環','環境部','法規、政策與聲音照相'), iconText('院','國環院','檢測機構、比測與技術資料')
     ]}, footer:{type:'box', layout:'vertical', spacing:'sm', contents:[lawButton('今日新聞摘要','噪音車新聞','#009b72'), flexUriButton('噪音車專區', lawSources.noiseCar, '#54606f')] }}
   ] }};
@@ -861,7 +861,7 @@ function getEquipmentDashboardFlex() {
   const alerts = summary.alerts.slice(0, 5);
   return { type:'flex', altText:'設備管理提醒', contents:{ type:'bubble', size:'mega',
     header:{ type:'box', layout:'vertical', backgroundColor:'#1f6f8b', paddingAll:'18px', contents:[
-      { type:'text', text:'🔧 設備管理', color:'#fff', weight:'bold', size:'lg' },
+      { type:'text', text:'🔧 設備管理', color:'#ffffff', weight:'bold', size:'lg' },
       { type:'text', text:'比測、噪音計檢定、風速計檢定到期提醒', color:'#d8f7ff', size:'sm', wrap:true }
     ]},
     body:{ type:'box', layout:'vertical', spacing:'md', paddingAll:'16px', contents:[
@@ -923,24 +923,50 @@ function logLineEvent(item) {
   lineDebug.lastEvents.unshift({ at: new Date().toISOString(), ...item });
   lineDebug.lastEvents = lineDebug.lastEvents.slice(0, 30);
 }
-async function replyLine(replyToken, messages) {
-  if (!LINE_TOKEN || !replyToken) {
-    lineDebug.lastError = { at: new Date().toISOString(), message: 'LINE_TOKEN or replyToken missing' };
-    return;
-  }
-  const payload = { replyToken, messages: Array.isArray(messages) ? messages : [messages] };
+function flexFallbackText(messages) {
+  const arr = Array.isArray(messages) ? messages : [messages];
+  const parts = arr.map(m => {
+    if (m?.type === 'text') return m.text;
+    if (m?.type === 'flex') return `已收到您的查詢：${m.altText || '系統功能'}。\n目前已切換為文字備援回覆，請稍後再試一次或輸入「選單」。`;
+    return '已收到您的查詢。';
+  });
+  return parts.filter(Boolean).join('\n\n').slice(0, 4500) || '感謝您的回覆🙂';
+}
+
+async function postLineReply(payload) {
   const response = await fetch('https://api.line.me/v2/bot/message/reply', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${LINE_TOKEN}` },
     body: JSON.stringify(payload)
   });
   const body = await response.text();
-  lineDebug.lastReply = { at: new Date().toISOString(), status: response.status, body: body.slice(0, 1000), messageCount: payload.messages.length };
+  return { response, body };
+}
+
+async function replyLine(replyToken, messages) {
+  if (!LINE_TOKEN || !replyToken) {
+    lineDebug.lastError = { at: new Date().toISOString(), message: 'LINE_TOKEN or replyToken missing' };
+    return;
+  }
+  const payload = { replyToken, messages: Array.isArray(messages) ? messages : [messages] };
+  let { response, body } = await postLineReply(payload);
+  lineDebug.lastReply = { at: new Date().toISOString(), status: response.status, body: body.slice(0, 2000), messageCount: payload.messages.length };
+  if (!response.ok && payload.messages.some(m => m?.type === 'flex')) {
+    const fallbackPayload = { replyToken, messages: [{ type:'text', text: flexFallbackText(payload.messages) }] };
+    const retry = await postLineReply(fallbackPayload);
+    lineDebug.lastReplyFallback = { at: new Date().toISOString(), originalStatus: response.status, originalBody: body.slice(0, 2000), fallbackStatus: retry.response.status, fallbackBody: retry.body.slice(0, 2000) };
+    response = retry.response;
+    body = retry.body;
+  }
   if (!response.ok) throw new Error(`LINE Reply API failed ${response.status}: ${body}`);
 }
 
-app.get('/api/line/test', (_req, res) => res.json({ ok: true, service: 'newtaipei-noise-control-system-v11-enterprise', message: 'LINE BOT OK', hasToken: !!LINE_TOKEN, hasSecret: !!LINE_SECRET }));
+app.get('/api/line/test', (_req, res) => res.json({ ok: true, service: 'newtaipei-noise-control-system-v12-ultimate', message: 'LINE BOT OK', hasToken: !!LINE_TOKEN, hasSecret: !!LINE_SECRET }));
 app.get('/api/line/debug/latest', (_req, res) => res.json({ ok: true, debug: lineDebug }));
+
+app.get('/api/debug/flex/law', (_req, res) => res.json({ ok:true, sample:'law-center', message:getLawCenterFlex() }));
+app.get('/api/debug/flex/equipment', (_req, res) => res.json({ ok:true, sample:'equipment-dashboard', message:getEquipmentDashboardFlex() }));
+app.get('/api/debug/flex/kpi', (_req, res) => res.json({ ok:true, sample:'kpi-progress', message:formatProgressCard({}) }));
 app.get('/api/line/webhook', (_req, res) => res.status(405).send('LINE webhook endpoint is ready. Use POST from LINE Messaging API.'));
 
 app.post('/api/line/webhook', async (req, res) => {
@@ -1070,7 +1096,7 @@ function buildRichMenuSpec(_base) {
     const c=i%cols, r=Math.floor(i/cols);
     return { bounds:{ x: margin + c*(tw+gap), y: header + margin + r*(th+gap), width: tw, height: th }, action };
   });
-  return { size: { width: W, height: H }, selected: true, name: '新北噪音車V10企業版圖文選單', chatBarText: '管理選單', areas };
+  return { size: { width: W, height: H }, selected: true, name: '新北噪音車V12 Ultimate企業版圖文選單', chatBarText: '管理選單', areas };
 }
 
 app.use((err, _req, res, _next) => {
