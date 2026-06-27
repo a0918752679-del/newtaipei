@@ -243,7 +243,7 @@ function normalizeImportedRow(row, index) {
   };
 }
 
-app.get('/healthz', (_req, res) => res.json({ ok: true, service: 'newtaipei-noise-control-system-v14.1-clean-updated' }));
+app.get('/healthz', (_req, res) => res.json({ ok: true, service: 'newtaipei-noise-control-system-v15-stable' }));
 app.get('/api/meta', (_req, res) => {
   const store = readStore();
   res.json({
@@ -1062,7 +1062,7 @@ async function replyLine(replyToken, messages) {
   if (!response.ok) throw new Error(`LINE Reply API failed ${response.status}: ${body}`);
 }
 
-app.get('/api/line/test', (_req, res) => res.json({ ok: true, service: 'newtaipei-noise-control-system-v14.1-clean-updated', message: 'LINE BOT OK', hasToken: !!LINE_TOKEN, hasSecret: !!LINE_SECRET }));
+app.get('/api/line/test', (_req, res) => res.json({ ok: true, service: 'newtaipei-noise-control-system-v15-stable', message: 'LINE BOT OK', hasToken: !!LINE_TOKEN, hasSecret: !!LINE_SECRET }));
 app.get('/api/line/debug/latest', (_req, res) => res.json({ ok: true, debug: lineDebug }));
 
 app.get('/api/debug/flex/law', (_req, res) => res.json({ ok:true, sample:'law-center', message:getLawCenterFlex() }));
