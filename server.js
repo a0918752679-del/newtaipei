@@ -204,7 +204,7 @@ function normalizeImportedRow(row, index) {
   };
 }
 
-app.get('/healthz', (_req, res) => res.json({ ok: true, service: 'newtaipei-noise-control-system' }));
+app.get('/healthz', (_req, res) => res.json({ ok: true, service: 'newtaipei-noise-control-system-v10-enterprise' }));
 app.get('/api/meta', (_req, res) => {
   const store = readStore();
   res.json({
@@ -494,7 +494,7 @@ async function lineApi(pathname, options = {}) {
 
 async function createAndSetDefaultRichMenu() {
   const spec = buildRichMenuSpec(PUBLIC_BASE_URL);
-  spec.name = '新北噪音車V9智慧版圖文選單';
+  spec.name = '新北噪音車V10企業版圖文選單';
 
   // 先建立新的 Rich Menu
   const created = await lineApi('/v2/bot/richmenu', {
@@ -933,7 +933,11 @@ app.post('/api/line/webhook', async (req, res) => {
   const events = req.body?.events || [];
   res.json({ ok: true });
   for (const event of events) {
-    if (event.type !== 'message' || event.message?.type !== 'text') continue;
+    if (event.type !== 'message') continue;
+    if (event.message?.type !== 'text') {
+      try { await replyLine(event.replyToken, { type:'text', text:'感謝您的回覆🙂' }); } catch(e) { console.error(e); }
+      continue;
+    }
     const userId = event.source?.userId || 'unknown';
     rememberLineUser(userId);
     const text = event.message.text || '';
@@ -949,11 +953,11 @@ app.post('/api/line/webhook', async (req, res) => {
       }
 
       const cmd = parseLineCommand(text);
-      if (/法規中心|法規|法律中心/.test(text)) await replyLine(event.replyToken, getLawCenterFlex());
+      if (/法規中心|法規查詢|法規專區|法律中心|噪音管制法/.test(text)) await replyLine(event.replyToken, getLawCenterFlex());
       else if (/最新修法|修法重點|修法/.test(text)) await replyLine(event.replyToken, { type:'text', text:getRevisionText() });
       else if (/法條\s*(11|13|26|28)/.test(text)) await replyLine(event.replyToken, { type:'text', text:getLawArticleText(text.match(/法條\s*(11|13|26|28)/)[1]) });
       else if (/噪音車新聞|今日新聞|新聞/.test(text)) await replyLine(event.replyToken, { type:'text', text:getNoiseNewsText() });
-      else if (/設備管理|設備儀表板|設備$/.test(text)) await replyLine(event.replyToken, getEquipmentDashboardFlex());
+      else if (/設備管理|設備查詢|設備提醒|設備儀表板|設備$/.test(text)) await replyLine(event.replyToken, getEquipmentDashboardFlex());
       else if (/設備清單|設備列表/.test(text)) await replyLine(event.replyToken, { type:'text', text:getEquipmentListText() });
       else if (/設備提醒推播|推播今日提醒/.test(text)) { const n = await pushEquipmentReminders(); await replyLine(event.replyToken, { type:'text', text:`已發送設備提醒給 ${n} 位已互動使用者。` }); }
       else if (/設備\s*([A-Za-z0-9_\-]+)/.test(text)) await replyLine(event.replyToken, { type:'text', text:formatEquipmentDetailText(text.match(/設備\s*([A-Za-z0-9_\-]+)/)[1]) });
@@ -977,7 +981,7 @@ app.post('/api/line/webhook', async (req, res) => {
       else if (cmd.plate) await replyLine(event.replyToken, { type: 'text', text: formatPlateText(cmd.plate) });
       else if (cmd.wantsKpi || cmd.wantsProgress) await replyLine(event.replyToken, formatProgressCard({ month: cmd.month, district: cmd.district }));
       else if (cmd.wantsStats) await replyLine(event.replyToken, { type: 'text', text: formatStatsForLine({ month: cmd.month, district: cmd.district }) });
-      else await replyLine(event.replyToken, { type: 'text', text: '我目前可以協助你查詢成果、KPI、月份、行政區、車號，也可以啟動外勤回報。\n\n請點下方「管理選單」，或輸入：成果查詢、外勤回報、KPI報表、車號查詢、2月份執行成效、淡水區執行成效。' });
+      else await replyLine(event.replyToken, { type: 'text', text: '感謝您的回覆🙂' });
     } catch (error) {
       console.error('LINE reply failed', error);
     }
@@ -1043,7 +1047,7 @@ function buildRichMenuSpec(_base) {
     const c=i%cols, r=Math.floor(i/cols);
     return { bounds:{ x: margin + c*(tw+gap), y: header + margin + r*(th+gap), width: tw, height: th }, action };
   });
-  return { size: { width: W, height: H }, selected: true, name: '新北噪音車V9智慧版圖文選單', chatBarText: '管理選單', areas };
+  return { size: { width: W, height: H }, selected: true, name: '新北噪音車V10企業版圖文選單', chatBarText: '管理選單', areas };
 }
 
 app.use((err, _req, res, _next) => {
