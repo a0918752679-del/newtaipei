@@ -204,7 +204,7 @@ function normalizeImportedRow(row, index) {
   };
 }
 
-app.get('/healthz', (_req, res) => res.json({ ok: true, service: 'newtaipei-noise-control-system-v10-enterprise' }));
+app.get('/healthz', (_req, res) => res.json({ ok: true, service: 'newtaipei-noise-control-system-v11-enterprise' }));
 app.get('/api/meta', (_req, res) => {
   const store = readStore();
   res.json({
@@ -543,6 +543,7 @@ async function getRichMenuStatus() {
 }
 
 function verifyLineSignature(req) {
+  if (process.env.LINE_SIGNATURE_VERIFY === 'false') return true;
   if (!LINE_SECRET) return true;
   const signature = req.headers['x-line-signature'];
   if (!signature || !req.rawBody) return false;
@@ -917,30 +918,51 @@ setInterval(async () => {
   } catch (e) { console.error('daily equipment reminder failed', e); }
 }, 5 * 60 * 1000);
 
+const lineDebug = { lastEvents: [], lastReply: null, lastError: null, lastSignature: null };
+function logLineEvent(item) {
+  lineDebug.lastEvents.unshift({ at: new Date().toISOString(), ...item });
+  lineDebug.lastEvents = lineDebug.lastEvents.slice(0, 30);
+}
 async function replyLine(replyToken, messages) {
-  if (!LINE_TOKEN || !replyToken) return;
-  await fetch('https://api.line.me/v2/bot/message/reply', {
+  if (!LINE_TOKEN || !replyToken) {
+    lineDebug.lastError = { at: new Date().toISOString(), message: 'LINE_TOKEN or replyToken missing' };
+    return;
+  }
+  const payload = { replyToken, messages: Array.isArray(messages) ? messages : [messages] };
+  const response = await fetch('https://api.line.me/v2/bot/message/reply', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${LINE_TOKEN}` },
-    body: JSON.stringify({ replyToken, messages: Array.isArray(messages) ? messages : [messages] })
+    body: JSON.stringify(payload)
   });
+  const body = await response.text();
+  lineDebug.lastReply = { at: new Date().toISOString(), status: response.status, body: body.slice(0, 1000), messageCount: payload.messages.length };
+  if (!response.ok) throw new Error(`LINE Reply API failed ${response.status}: ${body}`);
 }
 
+app.get('/api/line/test', (_req, res) => res.json({ ok: true, service: 'newtaipei-noise-control-system-v11-enterprise', message: 'LINE BOT OK', hasToken: !!LINE_TOKEN, hasSecret: !!LINE_SECRET }));
+app.get('/api/line/debug/latest', (_req, res) => res.json({ ok: true, debug: lineDebug }));
 app.get('/api/line/webhook', (_req, res) => res.status(405).send('LINE webhook endpoint is ready. Use POST from LINE Messaging API.'));
 
 app.post('/api/line/webhook', async (req, res) => {
-  if (!verifyLineSignature(req)) return res.status(401).json({ ok: false, message: 'LINE signature invalid' });
+  const valid = verifyLineSignature(req);
+  lineDebug.lastSignature = { at: new Date().toISOString(), valid, hasSignature: !!req.headers['x-line-signature'] };
+  if (!valid) return res.status(401).json({ ok: false, message: 'LINE signature invalid' });
   const events = req.body?.events || [];
   res.json({ ok: true });
   for (const event of events) {
-    if (event.type !== 'message') continue;
-    if (event.message?.type !== 'text') {
-      try { await replyLine(event.replyToken, { type:'text', text:'感謝您的回覆🙂' }); } catch(e) { console.error(e); }
-      continue;
-    }
     const userId = event.source?.userId || 'unknown';
     rememberLineUser(userId);
-    const text = event.message.text || '';
+    let text = '';
+    if (event.type === 'message' && event.message?.type === 'text') text = event.message.text || '';
+    else if (event.type === 'postback') text = event.postback?.data || event.postback?.params?.text || '';
+    else {
+      logLineEvent({ type: event.type, userId, messageType: event.message?.type || '', text: '' });
+      if (event.replyToken) {
+        try { await replyLine(event.replyToken, { type:'text', text:'感謝您的回覆🙂' }); } catch(e) { console.error(e); lineDebug.lastError = { at: new Date().toISOString(), message: e.message }; }
+      }
+      continue;
+    }
+    logLineEvent({ type: event.type, userId, text });
     const state = lineStates.get(userId);
     try {
       if (state?.mode === 'field') { await replyLine(event.replyToken, handleFieldReport(userId, text)); continue; }
@@ -984,6 +1006,7 @@ app.post('/api/line/webhook', async (req, res) => {
       else await replyLine(event.replyToken, { type: 'text', text: '感謝您的回覆🙂' });
     } catch (error) {
       console.error('LINE reply failed', error);
+      lineDebug.lastError = { at: new Date().toISOString(), message: error.message, stack: String(error.stack || '').slice(0, 1500) };
     }
   }
 });
